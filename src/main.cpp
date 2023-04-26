@@ -5,7 +5,11 @@
 
 auto main( ) -> int
 {
-    LoadLibraryA( "ntdll.dll" );
+    LoadLibraryA( "win32u.dll" );
+
+    auto id = direct_syscall::get_syscall_id( "win32u.dll", "NtUserGetAsyncKeyState" );
+
+    std::printf( "%d", id );
 
     return 1;
 }

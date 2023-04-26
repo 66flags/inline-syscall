@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <intrin.h>
+#include <cstdio>
 #include <string>
 #include <windows.h>
 
@@ -322,7 +323,7 @@ namespace direct_syscall
 
     namespace utils
     {
-        inline nt::PEB *get_peb( )
+        inline nt::PEB *get_peb()
         {
 #if defined( _M_X64 )// x64
             return reinterpret_cast< nt::PEB * >( __readgsqword( 0x60 ) );
@@ -383,17 +384,13 @@ namespace direct_syscall
             auto module = utils::get_module_handle< void * >( module_name );
 
             if ( !module )
-                return nullptr;
+                return type( NULL );
 
             auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module );
-
-            if ( !dos_headers )
-                return nullptr;
-
             auto nt_headers = reinterpret_cast< PIMAGE_NT_HEADERS >( reinterpret_cast< uintptr_t >( module ) + dos_headers->e_lfanew );
 
             if ( nt_headers->Signature != IMAGE_NT_SIGNATURE )
-                return nullptr;
+                return type( NULL );
 
             auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( reinterpret_cast< uintptr_t >( module ) + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
             auto image_ordinal_array = reinterpret_cast< uint16_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfNameOrdinals );
@@ -407,12 +404,51 @@ namespace direct_syscall
                     continue;
 
                 if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name ) )
-                    return reinterpret_cast< type >( reinterpret_cast< uintptr_t >( module ) + image_function_addresses[ image_ordinal_array[ i ] ] );
+                    return type( reinterpret_cast< uintptr_t >( module ) + image_function_addresses[ image_ordinal_array[ i ] ] );
             }
 
-            return nullptr;
+            return type( NULL );
         }
     }// namespace utils
+
+    inline int32_t get_syscall_id( const char *module_name, const char *export_name )
+    {
+        auto instruction = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;// mov eax, <syscall id>
+
+        if ( !instruction )
+            return 0;
+
+        return *reinterpret_cast< int32_t * >( instruction + 1 );
+    }
+
+    template< typename type, typename... args >
+    inline type invoke_syscall( const char *module_name, const char *export_name, args... function_args )
+    {
+        auto syscall_id = get_syscall_id( module_name, export_name );
+
+        if ( !syscall_id )
+            return reinterpret_cast< type >( nullptr );
+
+        unsigned char shellcode[ ] =
+        {
+                 0x49, 0x89, 0xCA,            // mov r10, rcx
+                 0xB8, 0x3F, 0x10, 0x00, 0x00,// mov eax, syscall_id
+                 0x0F, 0x05,                  // syscall
+                 0xC3                         // ret
+        }; // size = 11;
+
+        memcpy( &shellcode[ 4 ], &syscall_id, sizeof( int32_t ) );
+
+        auto allocated = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+
+        if ( allocated )
+        {
+            // TODO.
+        }
+
+        return reinterpret_cast< type >( nullptr );
+    }
+
 }// namespace direct_syscall
 
 #endif//DIRECT_SYSCALL_DIRECT_SYSCALL_HPP
