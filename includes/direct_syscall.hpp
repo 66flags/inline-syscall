@@ -318,6 +318,8 @@ namespace direct_syscall
         };
     };// namespace hash
 
+    using fnv1a = hash::fnv1a< hash32_t >;
+
     namespace utils
     {
         inline nt::PEB *get_peb( )
@@ -357,11 +359,11 @@ namespace direct_syscall
 
                 auto name = utils::convert_wide_to_utf8( ldr_entry->BaseDllName.Buffer );
 
-                if ( hash::fnv1a< hash32_t >::hash_const( name.data( ) ) == module_hash )
+                if ( fnv1a::hash_const( name.data( ) ) == module_hash )
                     return static_cast< type >( ldr_entry->DllBase );
             }
 
-            return static_cast< type >( nullptr ); // lol.
+            return static_cast< type >( nullptr );
         }
 
         template< typename type >
@@ -372,10 +374,45 @@ namespace direct_syscall
             if ( !module_name )
                 return static_cast< type >( peb->ImageBaseAddress );
 
-            return get_module_handle_from_hash< type >( hash::fnv1a< hash32_t >::hash_const( module_name ) );
+            return get_module_handle_from_hash< type >( fnv1a::hash_const( module_name ) );
+        }
+
+        template< typename type >
+        inline type get_module_export( const char *module_name, const char *export_name )
+        {
+            auto module = utils::get_module_handle< void * >( module_name );
+
+            if ( !module )
+                return nullptr;
+
+            auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module );
+
+            if ( !dos_headers )
+                return nullptr;
+
+            auto nt_headers = reinterpret_cast< PIMAGE_NT_HEADERS >( reinterpret_cast< uintptr_t >( module ) + dos_headers->e_lfanew );
+
+            if ( nt_headers->Signature != IMAGE_NT_SIGNATURE )
+                return nullptr;
+
+            auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( reinterpret_cast< uintptr_t >( module ) + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
+            auto image_ordinal_array = reinterpret_cast< uint16_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfNameOrdinals );
+            auto image_function_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfFunctions );
+            auto image_name_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfNames );
+
+            for ( auto i = 0; i < image_export_directory->NumberOfFunctions; i++ ) {
+                auto export_address_name = reinterpret_cast< const char * >( reinterpret_cast< uintptr_t >( module ) + image_name_addresses[ i ] );
+
+                if ( !export_address_name )
+                    continue;
+
+                if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name ) )
+                    return reinterpret_cast< type >( reinterpret_cast< uintptr_t >( module ) + image_function_addresses[ image_ordinal_array[ i ] ] );
+            }
+
+            return nullptr;
         }
     }// namespace utils
-
 }// namespace direct_syscall
 
 #endif//DIRECT_SYSCALL_DIRECT_SYSCALL_HPP

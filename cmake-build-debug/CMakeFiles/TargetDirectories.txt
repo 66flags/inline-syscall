@@ -1,3 +1,0 @@
-D:/Repositories/direct-syscall/cmake-build-debug/CMakeFiles/direct-syscall.dir
-D:/Repositories/direct-syscall/cmake-build-debug/CMakeFiles/edit_cache.dir
-D:/Repositories/direct-syscall/cmake-build-debug/CMakeFiles/rebuild_cache.dir
