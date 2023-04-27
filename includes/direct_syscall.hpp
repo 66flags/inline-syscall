@@ -1,21 +1,36 @@
-#ifndef DIRECT_SYSCALL_DIRECT_SYSCALL_HPP
-#define DIRECT_SYSCALL_DIRECT_SYSCALL_HPP
+#ifndef DIRECT_SYSCALL_HPP
+#define DIRECT_SYSCALL_HPP
 
 #include <cstdint>
-#include <intrin.h>
-#include <cstdio>
 #include <string>
 #include <windows.h>
 
-namespace direct_syscall
-{
-    namespace nt
-    {
+#ifndef SYSCALL_NO_FORCEINLINE
+#if defined( _MSC_VER )
+#define SYSCALL_FORCEINLINE __forceinline
+#endif
+#else
+#define SYSCALL_FORCEINLINE inline
+#endif
+
+#include <intrin.h>
+
+namespace syscall {
+    namespace win {
         struct UNICODE_STRING {
             uint16_t Length;
             uint16_t MaximumLength;
             wchar_t *Buffer;
         };
+
+        typedef struct _PEB_LDR_DATA {
+            ULONG Length;
+            BOOLEAN Initialized;
+            PVOID SsHandle;
+            LIST_ENTRY InLoadOrderModuleList;
+            LIST_ENTRY InMemoryOrderModuleList;
+            LIST_ENTRY InInitializationOrderModuleList;
+        } PEB_LDR_DATA, *PPEB_LDR_DATA;
 
         typedef struct _LDR_MODULE {
             LIST_ENTRY InLoadOrderModuleList;
@@ -33,15 +48,6 @@ namespace direct_syscall
             ULONG TimeDateStamp;
 
         } LDR_MODULE, *PLDR_MODULE;
-
-        typedef struct _PEB_LDR_DATA {
-            ULONG Length;
-            BOOLEAN Initialized;
-            PVOID SsHandle;
-            LIST_ENTRY InLoadOrderModuleList;
-            LIST_ENTRY InMemoryOrderModuleList;
-            LIST_ENTRY InInitializationOrderModuleList;
-        } PEB_LDR_DATA, *PPEB_LDR_DATA;
 
         typedef struct _PEB_FREE_BLOCK {
             _PEB_FREE_BLOCK *Next;
@@ -298,12 +304,11 @@ namespace direct_syscall
             PVOID ActivePatchImageBase;
             uintptr_t HotPatchState;
         } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
-    }// namespace nt
+    }// namespace win
 
     using hash32_t = std::uint32_t;
 
-    namespace hash
-    {
+    namespace hash {
         static constexpr hash32_t fnv_prime_value = 0x01000193;
         static constexpr hash32_t fnv_offset_basis = 0x811c9dc5;
 
@@ -312,8 +317,7 @@ namespace direct_syscall
 
         template<>
         struct fnv1a< hash32_t > {
-            static constexpr hash32_t hash_const( const char *input, hash32_t val = fnv_offset_basis )
-            {
+            static constexpr hash32_t hash_const( const char *input, hash32_t val = fnv_offset_basis ) {
                 return input[ 0 ] == '\0' ? val : hash_const( input + 1, ( val ^ *input ) * fnv_prime_value );
             }
         };
@@ -321,30 +325,26 @@ namespace direct_syscall
 
     using fnv1a = hash::fnv1a< hash32_t >;
 
-    namespace utils
-    {
-        inline nt::PEB *get_peb()
-        {
-#if defined( _M_X64 )// x64
-            return reinterpret_cast< nt::PEB * >( __readgsqword( 0x60 ) );
+    namespace utils {
+        SYSCALL_FORCEINLINE win::PEB *get_peb( ) {
+#if defined( _M_X64 )
+            return reinterpret_cast< win::PEB * >( __readgsqword( 0x60 ) );
 #else
             return reinterpret_cast< nt::PEB * >( __readfsdword( 0x30 ) );
 #endif
         }
 
-        inline std::string convert_wide_to_utf8( wchar_t *buffer )
-        {
-            auto wstring = std::wstring( buffer );
+        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) {
+            auto str = std::wstring( buffer );
 
-            if ( wstring.empty( ) )
+            if ( str.empty() )
                 return "";
 
-            return std::string( wstring.begin( ), wstring.end( ) );
+            return std::string( str.begin( ), str.end( ) );
         }
 
         template< typename type >
-        inline type get_module_handle_from_hash( const hash32_t &module_hash )
-        {
+        SYSCALL_FORCEINLINE type get_module_handle_from_hash( const hash32_t &module_hash ) {
             auto peb = utils::get_peb( );
 
             if ( !peb )
@@ -353,14 +353,15 @@ namespace direct_syscall
             auto head = &peb->LoaderData->InLoadOrderModuleList;
 
             for ( auto it = head->Flink; it != head; it = it->Flink ) {
-                nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it, nt::LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
+                win::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it, win::LDR_DATA_TABLE_ENTRY,
+                                                                           InLoadOrderLinks );
 
                 if ( !ldr_entry->BaseDllName.Buffer )
                     continue;
 
-                auto name = utils::convert_wide_to_utf8( ldr_entry->BaseDllName.Buffer );
+                auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
-                if ( fnv1a::hash_const( name.data( ) ) == module_hash )
+                if ( fnv1a::hash_const( name.data() ) == module_hash )
                     return static_cast< type >( ldr_entry->DllBase );
             }
 
@@ -368,8 +369,7 @@ namespace direct_syscall
         }
 
         template< typename type >
-        inline type get_module_handle( const char *module_name )
-        {
+        SYSCALL_FORCEINLINE type get_module_handle( const char *module_name ) {
             auto peb = utils::get_peb( );
 
             if ( !module_name )
@@ -379,40 +379,39 @@ namespace direct_syscall
         }
 
         template< typename type >
-        inline type get_module_export( const char *module_name, const char *export_name )
-        {
-            auto module = utils::get_module_handle< void * >( module_name );
+        SYSCALL_FORCEINLINE type get_module_export( const char *module_name, const char *export_name ) {
+            auto module_base = utils::get_module_handle< void * >( module_name );
 
-            if ( !module )
-                return type( NULL );
+            if ( !module_base )
+                return static_cast< type >( 0 );
 
-            auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module );
-            auto nt_headers = reinterpret_cast< PIMAGE_NT_HEADERS >( reinterpret_cast< uintptr_t >( module ) + dos_headers->e_lfanew );
+            auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module_base );
+            auto nt_headers = reinterpret_cast< PIMAGE_NT_HEADERS >( reinterpret_cast< uintptr_t >( module_base ) + dos_headers->e_lfanew );
 
             if ( nt_headers->Signature != IMAGE_NT_SIGNATURE )
-                return type( NULL );
+                return static_cast< type >( 0 );
 
-            auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( reinterpret_cast< uintptr_t >( module ) + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
-            auto image_ordinal_array = reinterpret_cast< uint16_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfNameOrdinals );
-            auto image_function_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfFunctions );
-            auto image_name_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module ) + image_export_directory->AddressOfNames );
+            auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( reinterpret_cast< uintptr_t >( module_base ) + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
+            auto image_ordinal_array = reinterpret_cast< uint16_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfNameOrdinals );
+            auto image_function_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfFunctions );
+            auto image_name_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfNames );
 
             for ( auto i = 0; i < image_export_directory->NumberOfFunctions; i++ ) {
-                auto export_address_name = reinterpret_cast< const char * >( reinterpret_cast< uintptr_t >( module ) + image_name_addresses[ i ] );
+                auto export_address_name = reinterpret_cast< const char * >(
+                        reinterpret_cast< uintptr_t >( module_base ) + image_name_addresses[ i ] );
 
                 if ( !export_address_name )
                     continue;
 
                 if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name ) )
-                    return type( reinterpret_cast< uintptr_t >( module ) + image_function_addresses[ image_ordinal_array[ i ] ] );
+                    return static_cast< type >( reinterpret_cast< uintptr_t >( module_base ) + image_function_addresses[ image_ordinal_array[ i ] ] );
             }
 
-            return type( NULL );
+            return static_cast< type >( 0 );
         }
     }// namespace utils
 
-    inline int32_t get_syscall_id( const char *module_name, const char *export_name )
-    {
+    SYSCALL_FORCEINLINE int32_t get_syscall_id( const char *module_name, const char *export_name ) {
         auto instruction = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;// mov eax, <syscall id>
 
         if ( !instruction )
@@ -422,33 +421,36 @@ namespace direct_syscall
     }
 
     template< typename type, typename... args >
-    inline type invoke_syscall( const char *module_name, const char *export_name, args... function_args )
-    {
+    SYSCALL_FORCEINLINE type invoke_syscall( const char *module_name, const char *export_name, args... function_args ) {
         auto syscall_id = get_syscall_id( module_name, export_name );
 
         if ( !syscall_id )
-            return reinterpret_cast< type >( nullptr );
+            return static_cast< type >( 0 );
 
-        unsigned char shellcode[ ] =
-        {
-                 0x49, 0x89, 0xCA,            // mov r10, rcx
-                 0xB8, 0x3F, 0x10, 0x00, 0x00,// mov eax, syscall_id
-                 0x0F, 0x05,                  // syscall
-                 0xC3                         // ret
-        }; // size = 11;
+        using return_typedef_fn = type( __stdcall * )( args... );
+
+        unsigned char shellcode[] = {
+                0x49, 0x89, 0xCA,            // mov r10, rcx
+                0xB8, 0x3F, 0x10, 0x00, 0x00,// mov eax, syscall_id
+                0x0F, 0x05,                  // syscall
+                0xC3                         // ret
+        };                                   // size = 11;
 
         memcpy( &shellcode[ 4 ], &syscall_id, sizeof( int32_t ) );
 
         auto allocated = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
-        if ( allocated )
-        {
-            // TODO.
+        if ( allocated ) {
+            memcpy( allocated, shellcode, sizeof( shellcode ) );
+
+            return_typedef_fn returned_function = nullptr;
+            *reinterpret_cast< void ** >( &returned_function ) = allocated;
+
+            return static_cast< type >( returned_function( function_args... ) );
         }
 
-        return reinterpret_cast< type >( nullptr );
+        return static_cast< type >( 0 );
     }
+}// namespace syscall
 
-}// namespace direct_syscall
-
-#endif//DIRECT_SYSCALL_DIRECT_SYSCALL_HPP
+#endif//DIRECT_SYSCALL_HPP

@@ -1,15 +1,14 @@
 #include <cstdint>
+#include <direct_syscall.hpp>
 #include <iostream>
 #include <windows.h>
-#include <direct_syscall.hpp>
 
-auto main( ) -> int
-{
+auto main( ) -> int {
     LoadLibraryA( "win32u.dll" );
 
-    auto id = direct_syscall::get_syscall_id( "win32u.dll", "NtUserGetAsyncKeyState" );
-
-    std::printf( "%d", id );
+    // example.
+    while ( !syscall::invoke_syscall< SHORT >( "win32u.dll", "NtUserGetAsyncKeyState", VK_INSERT ) & 1 )
+        printf( "lol\n" );
 
     return 1;
 }
