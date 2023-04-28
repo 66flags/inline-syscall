@@ -1,19 +1,3 @@
-/*
-    Copyright (C) 2023 hypnotic
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
-
 #ifndef DIRECT_SYSCALL_HPP
 #define DIRECT_SYSCALL_HPP
 
@@ -326,7 +310,8 @@ namespace syscall {
 
         template<>
         struct fnv1a< uint32_t > {
-            SYSCALL_FORCEINLINE static constexpr uint32_t hash_const( const char *input, uint32_t val = fnv_offset_basis ) {
+            SYSCALL_FORCEINLINE static constexpr uint32_t hash_const( const char *input, uint32_t val = fnv_offset_basis )
+            {
                 return input[ 0 ] == '\0' ? val : hash_const( input + 1, ( val ^ *input ) * fnv_prime_value );
             }
         };
@@ -335,7 +320,8 @@ namespace syscall {
     using fnv1a = hash::fnv1a< uint32_t >;
 
     namespace utils {
-        SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept {
+        SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept
+        {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
             return reinterpret_cast< win::PEB * >( __readgsqword( 0x60 ) );
@@ -345,7 +331,8 @@ namespace syscall {
 #endif
         }
 
-        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept {
+        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept
+        {
             auto string = std::wstring( buffer );
 
             if ( string.empty( ) )
@@ -355,7 +342,8 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept {
+        SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept
+        {
             auto peb = utils::get_peb( );
 
             if ( !peb )
@@ -380,7 +368,8 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle( const char *module_name ) noexcept {
+        SYSCALL_FORCEINLINE T get_module_handle( const char *module_name ) noexcept
+        {
             auto peb = utils::get_peb( );
 
             if ( !module_name )
@@ -390,7 +379,8 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_export( const char *module_name, const char *export_name ) noexcept {
+        SYSCALL_FORCEINLINE T get_module_export( const char *module_name, const char *export_name ) noexcept
+        {
             auto module_handle = utils::get_module_handle< void * >( module_name );
 
             if ( module_handle ) {
@@ -421,7 +411,8 @@ namespace syscall {
         }
     }// namespace utils
 
-    SYSCALL_FORCEINLINE int32_t get_syscall_table_id( const char *module_name, const char *export_name ) noexcept {
+    SYSCALL_FORCEINLINE int32_t get_syscall_table_id( const char *module_name, const char *export_name ) noexcept
+    {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
         auto export_address = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;
@@ -440,7 +431,13 @@ namespace syscall {
     public:
         SYSCALL_FORCEINLINE create_function( ) = default;
 
-        SYSCALL_FORCEINLINE create_function( const char *module_name, const char *export_name ) noexcept {
+        SYSCALL_FORCEINLINE ~create_function( ) noexcept
+        {
+            VirtualFree( this->_allocated_memory, 0, MEM_DECOMMIT | MEM_RELEASE );
+        }
+
+        SYSCALL_FORCEINLINE create_function( const char *module_name, const char *export_name ) noexcept
+        {
             this->_module_name = module_name;
             this->_export_name = export_name;
 
@@ -470,32 +467,36 @@ namespace syscall {
             memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int32_t ) );
 #endif
 #endif
-            auto allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+            this->_allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
-            if ( !allocated_memory )
+            if ( !this->_allocated_memory )
                 return;
 
-            memcpy( allocated_memory, shellcode, sizeof( shellcode ) );
-            *reinterpret_cast< void ** >( &this->_function ) = allocated_memory;
+            memcpy( this->_allocated_memory, shellcode, sizeof( shellcode ) );
+            *reinterpret_cast< void ** >( &this->_function ) = this->_allocated_memory;
         }
 
-        SYSCALL_FORCEINLINE bool is_valid( ) {
+        SYSCALL_FORCEINLINE bool is_valid( )
+        {
             return this->_function != nullptr;
         }
 
         template< typename T, typename... Args >
-        SYSCALL_FORCEINLINE T invoke( Args... arguments ) noexcept {
-            return reinterpret_cast< T ( __stdcall * )( Args... ) >( this->_function )( arguments... );
+        SYSCALL_FORCEINLINE T invoke( Args... arguments ) noexcept
+        {
+            return reinterpret_cast< T( __stdcall * )( Args... ) >( this->_function )( arguments... );
         }
 
     protected:
         const char *_module_name;
         const char *_export_name;
+        void *_allocated_memory = nullptr;
         void *_function = nullptr;
     };
 
     template< typename T, typename... Args >
-    SYSCALL_FORCEINLINE T invoke_simple( const char *export_name, Args... arguments ) noexcept {
+    SYSCALL_FORCEINLINE T invoke_simple( const char *export_name, Args... arguments ) noexcept
+    {
         static auto syscall = syscall::create_function{ "win32u.dll",
                                                         export_name };
 

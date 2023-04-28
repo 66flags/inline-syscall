@@ -32,3 +32,6 @@
 *.app
 cmake-build-debug
 cmake-build-debug
+src/main.cpp
+CMakeLists.txt
+.idea
