@@ -460,7 +460,8 @@ namespace syscall {
 #endif
             };
 
-            static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_name, this->_export_name );
+            static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_name,
+                                                                          this->_export_name );
 
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
@@ -495,7 +496,8 @@ namespace syscall {
 
     template< typename T, typename... Args >
     SYSCALL_FORCEINLINE T invoke_simple( const char *export_name, Args... arguments ) noexcept {
-        auto syscall = syscall::create_function{ "win32u.dll", export_name };
+        static auto syscall = syscall::create_function{ "win32u.dll",
+                                                        export_name };
 
         if ( !syscall.is_valid( ) ) {
             return NULL;
