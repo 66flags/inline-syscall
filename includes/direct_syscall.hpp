@@ -5,6 +5,10 @@
 #include <string>
 #include <windows.h>
 
+#if defined( _MSC_VER ) && defined( _M_IX86 )
+#define SYSCALL_X86_USE_INLINE_ASM
+#endif
+
 #ifndef SYSCALL_NO_FORCEINLINE
 #if defined( _MSC_VER )
 #define SYSCALL_FORCEINLINE __forceinline
@@ -327,17 +331,19 @@ namespace syscall {
 
     namespace utils {
         SYSCALL_FORCEINLINE win::PEB *get_peb( ) {
+#if _WIN32 || _WIN64
 #if defined( _M_X64 )
             return reinterpret_cast< win::PEB * >( __readgsqword( 0x60 ) );
 #else
-            return reinterpret_cast< nt::PEB * >( __readfsdword( 0x30 ) );
+            return reinterpret_cast< win::PEB * >( __readfsdword( 0x30 ) );
+#endif
 #endif
         }
 
         SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) {
             auto str = std::wstring( buffer );
 
-            if ( str.empty() )
+            if ( str.empty( ) )
                 return "";
 
             return std::string( str.begin( ), str.end( ) );
@@ -361,7 +367,7 @@ namespace syscall {
 
                 auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
-                if ( fnv1a::hash_const( name.data() ) == module_hash )
+                if ( fnv1a::hash_const( name.data( ) ) == module_hash )
                     return static_cast< type >( ldr_entry->DllBase );
             }
 
@@ -412,7 +418,11 @@ namespace syscall {
     }// namespace utils
 
     SYSCALL_FORCEINLINE int32_t get_syscall_id( const char *module_name, const char *export_name ) {
-        auto instruction = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;// mov eax, <syscall id>
+#if defined( _M_X64 )
+        auto instruction = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;
+#else
+        auto instruction = utils::get_module_export< uintptr_t >( module_name, export_name );
+#endif
 
         if ( !instruction )
             return 0;
@@ -422,34 +432,67 @@ namespace syscall {
 
     template< typename type, typename... args >
     SYSCALL_FORCEINLINE type invoke_syscall( const char *module_name, const char *export_name, args... function_args ) {
+        using return_typedef_fn = type( __stdcall * )( args... );
+        return_typedef_fn returned_function = nullptr;
+
         auto syscall_id = get_syscall_id( module_name, export_name );
 
         if ( !syscall_id )
             return static_cast< type >( 0 );
 
-        using return_typedef_fn = type( __stdcall * )( args... );
-
-        unsigned char shellcode[] = {
+#if _WIN32 || _WIN64
+#if defined( _M_X64 )
+        unsigned char shellcode[ ] = {
                 0x49, 0x89, 0xCA,            // mov r10, rcx
                 0xB8, 0x3F, 0x10, 0x00, 0x00,// mov eax, syscall_id
                 0x0F, 0x05,                  // syscall
                 0xC3                         // ret
-        };                                   // size = 11;
+        };
 
         memcpy( &shellcode[ 4 ], &syscall_id, sizeof( int32_t ) );
 
         auto allocated = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
-        if ( allocated ) {
-            memcpy( allocated, shellcode, sizeof( shellcode ) );
+        if ( !allocated )
+            return static_cast< type >( 0 );
 
-            return_typedef_fn returned_function = nullptr;
-            *reinterpret_cast< void ** >( &returned_function ) = allocated;
-
-            return static_cast< type >( returned_function( function_args... ) );
+        memcpy( allocated, shellcode, sizeof( shellcode ) );
+        *reinterpret_cast< void ** >( &returned_function ) = allocated;
+#else
+#ifdef SYSCALL_X86_USE_INLINE_ASM
+        __asm {
+            mov eax, syscall_id
+            mov edx, 0x10006C60
+            call edx
+            mov returned_function, edx
+            retn 4
         }
 
-        return static_cast< type >( 0 );
+        if ( !returned_function )
+                return static_cast< type >( 0 );
+#else
+        unsigned char shellcode[ ] = {
+                0xB8, 0x00, 0x10, 0x00, 0x00,      // mov eax, syscall_id
+                0xBA, 0x60, 0x6C, 0x00, 0x10,      // mov edx, 0x10006C60
+                0xFF, 0xD2,                        // call edx
+                0x89, 0x15, 0x00, 0x00, 0x00, 0x00,// mov returned_function, edx
+                0xC2, 0x04, 0x00                   // ret 4
+        };
+
+        memcpy( &shellcode[ 1 ], &syscall_id, sizeof( int32_t ) );
+
+        auto allocated = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+
+        if ( !allocated )
+            return static_cast< type >( 0 );
+
+        memcpy( allocated, shellcode, sizeof( shellcode ) );
+        *reinterpret_cast< void ** >( &returned_function ) = allocated;
+#endif
+#endif
+#endif
+
+        return static_cast< type >( returned_function( function_args... ) );
     }
 }// namespace syscall
 
