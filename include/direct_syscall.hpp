@@ -30,8 +30,7 @@ namespace syscall {
             LoadReasonEnclaveDependency,
             LoadReasonPatchImage,// since WIN11
             LoadReasonUnknown = -1
-        } LDR_DLL_LOAD_REASON,
-                *PLDR_DLL_LOAD_REASON;
+        } LDR_DLL_LOAD_REASON, *PLDR_DLL_LOAD_REASON;
 
         struct UNICODE_STRING {
             uint16_t Length;
@@ -411,7 +410,7 @@ namespace syscall {
         }
     }// namespace win_api
 
-    SYSCALL_FORCEINLINE int32_t get_syscall_table_id( const std::string_view &module_name, const std::string_view &export_name ) noexcept
+    SYSCALL_FORCEINLINE int get_syscall_table_id( const std::string_view &module_name, const std::string_view &export_name ) noexcept
     {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
@@ -424,7 +423,7 @@ namespace syscall {
         if ( !export_address )
             return NULL;
 
-        return *reinterpret_cast< int32_t * >( export_address + 1 );
+        return *reinterpret_cast< int * >( export_address + 1 );
     }
 
     struct create_function {
@@ -459,9 +458,9 @@ namespace syscall {
 
 #if defined( _WIN32 ) || defined( _WIN64 )
 #if defined( _M_X64 )
-            std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int32_t ) );
+            std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int ) );
 #else
-            std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int32_t ) );
+            std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int ) );
 #endif
 #endif
             _allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
