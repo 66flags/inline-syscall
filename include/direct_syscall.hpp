@@ -318,6 +318,18 @@ namespace syscall {
 
     using fnv1a = hash::fnv1a< uint32_t >;
 
+    namespace utils {
+        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept
+        {
+            auto string = std::wstring( buffer );
+
+            if ( string.empty( ) )
+                return "";
+
+            return std::string( string.begin( ), string.end( ) );
+        }
+    }// namespace utils
+
     namespace win_api {
         SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept
         {
@@ -328,16 +340,6 @@ namespace syscall {
             return reinterpret_cast< win::PEB * >( __readfsdword( 0x30 ) );
 #endif
 #endif
-        }
-
-        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept
-        {
-            auto string = std::wstring( buffer );
-
-            if ( string.empty( ) )
-                return "";
-
-            return std::string( string.begin( ), string.end( ) );
         }
 
         template< typename T >
@@ -357,7 +359,7 @@ namespace syscall {
                 if ( !ldr_entry->BaseDllName.Buffer )
                     continue;
 
-                auto name = win_api::wide_to_string( ldr_entry->BaseDllName.Buffer );
+                auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
                 if ( fnv1a::hash_const( name.data( ) ) == module_hash )
                     return reinterpret_cast< T >( ldr_entry->DllBase );
@@ -414,7 +416,7 @@ namespace syscall {
     {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
-        auto export_address = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;
+        auto export_address = win_api::get_module_export< uintptr_t >( module_name, export_name ) + 3;
 #else
         auto export_address = win_api::get_module_export< uintptr_t >( module_name, export_name );
 #endif
