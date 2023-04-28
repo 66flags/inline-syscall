@@ -31,7 +31,7 @@
 
 #include <intrin.h>
 
-namespace create_syscall {
+namespace syscall {
     namespace win {
         typedef enum _LDR_DLL_LOAD_REASON {
             LoadReasonStaticDependency,
@@ -426,62 +426,77 @@ namespace create_syscall {
         }
     }// namespace utils
 
-    SYSCALL_FORCEINLINE int32_t get_syscall_id( const char *module_name, const char *export_name ) noexcept {
+    SYSCALL_FORCEINLINE int32_t get_syscall_table_id( const char *module_name, const char *export_name ) noexcept {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
-        auto export_address = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;
+        auto exported_address = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;
 #else
-        auto export_address = utils::get_module_export< uintptr_t >( module_name, export_name );
+        auto exported_address = utils::get_module_export< uintptr_t >( module_name, export_name );
 #endif
 #endif
 
-        if ( !export_address )
+        if ( !exported_address )
             return 0;
 
-        return *reinterpret_cast< int32_t * >( export_address + 1 );
+        return *reinterpret_cast< int32_t * >( exported_address + 1 );
     }
 
-    template< typename T, typename... Args >
-    SYSCALL_FORCEINLINE T invoke_syscall( const char *module_name, const char *export_name, Args... arguments ) noexcept {
-        static auto syscall_id = get_syscall_id( module_name, export_name );
+    struct create_function {
+    public:
+        SYSCALL_FORCEINLINE create_function( ) = default;
 
-        if ( !syscall_id )
-            return static_cast< T >( 0 );
+        SYSCALL_FORCEINLINE create_function( const char *module_name, const char *export_name ) noexcept {
+            this->_module_name = module_name;
+            this->_export_name = export_name;
 
-        unsigned char shellcode[ ] = {
+            unsigned char shellcode[ ] = {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
-            0x49, 0x89, 0xCA,                       // mov r10, rcx
-            0xB8, 0x3F, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
-            0x0F, 0x05,                             // syscall
-            0xC3                                    // ret
+                0x49, 0x89, 0xCA,                       // mov r10, rcx
+                0xB8, 0x3F, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
+                0x0F, 0x05,                             // syscall
+                0xC3                                    // ret
 #else
-            0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
-            0x64, 0x8B,0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0
-            0xFF, 0xD2,                             // call edx
-            0xC2, 0x04, 0x00                        // ret 4
+                0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
+                0x64, 0x8B,0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0
+                0xFF, 0xD2,                             // call edx
+                0xC2, 0x04, 0x00                        // ret 4
 #endif
 #endif
-        };
+            };
+
+            static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_name, this->_export_name );
 
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
-        memcpy( &shellcode[ 4 ], &syscall_id, sizeof( int32_t ) );
+            memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int32_t ) );
 #else
-        memcpy( &shellcode[ 1 ], &syscall_id, sizeof( int32_t ) );
+            memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int32_t ) );
 #endif
 #endif
-        auto allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+            auto allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
-        if ( !allocated_memory )
-            return static_cast< T >( 0 );
+            if ( !allocated_memory )
+                return;
 
-        T( __stdcall * returned_function )( Args... ) = nullptr;
-        memcpy( allocated_memory, shellcode, sizeof( shellcode ) );
-        *reinterpret_cast< void ** >( &returned_function ) = allocated_memory;
+            memcpy( allocated_memory, shellcode, sizeof( shellcode ) );
+            *reinterpret_cast< void ** >( &this->_function ) = allocated_memory;
+        }
 
-        return static_cast< T >( returned_function( arguments... ) );
+        template< typename T, typename... Args >
+        SYSCALL_FORCEINLINE T invoke( Args... arguments ) noexcept {
+            return reinterpret_cast< T( __stdcall * )( Args... ) >( this->_function )( arguments... );
+        }
+
+    protected:
+        const char *_module_name;
+        const char *_export_name;
+        void *_function = nullptr;
+    };
+
+    SYSCALL_FORCEINLINE syscall::create_function create( const char *module_name, const char *export_name ) noexcept {
+        return { module_name, export_name };
     }
-}// namespace create_syscall
+}// namespace syscall
 
 #endif//DIRECT_SYSCALL_HPP
