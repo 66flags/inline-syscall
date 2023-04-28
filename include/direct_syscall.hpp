@@ -14,6 +14,7 @@
 #endif
 
 #include <intrin.h>
+#include <memory>
 
 namespace syscall {
     namespace win {
@@ -61,7 +62,6 @@ namespace syscall {
             SHORT TlsIndex;
             LIST_ENTRY HashTableEntry;
             ULONG TimeDateStamp;
-
         } LDR_MODULE, *PLDR_MODULE;
 
         typedef struct _PEB_FREE_BLOCK {
@@ -319,7 +319,7 @@ namespace syscall {
 
     using fnv1a = hash::fnv1a< uint32_t >;
 
-    namespace utils {
+    namespace win_api {
         SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept
         {
 #if _WIN32 || _WIN64
@@ -344,7 +344,7 @@ namespace syscall {
         template< typename T >
         SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept
         {
-            auto peb = utils::get_peb( );
+            auto peb = win_api::get_peb( );
 
             if ( !peb )
                 return NULL;
@@ -358,7 +358,7 @@ namespace syscall {
                 if ( !ldr_entry->BaseDllName.Buffer )
                     continue;
 
-                auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
+                auto name = win_api::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
                 if ( fnv1a::hash_const( name.data( ) ) == module_hash )
                     return reinterpret_cast< T >( ldr_entry->DllBase );
@@ -368,20 +368,20 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle( const char *module_name ) noexcept
+        SYSCALL_FORCEINLINE T get_module_handle( const std::string_view &module_name ) noexcept
         {
-            auto peb = utils::get_peb( );
+            auto peb = win_api::get_peb( );
 
-            if ( !module_name )
+            if ( !module_name.data( ) )
                 return static_cast< T >( peb->ImageBaseAddress );
 
-            return get_module_handle_from_hash< T >( fnv1a::hash_const( module_name ) );
+            return win_api::get_module_handle_from_hash< T >( fnv1a::hash_const( module_name.data( ) ) );
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_export( const char *module_name, const char *export_name ) noexcept
+        SYSCALL_FORCEINLINE T get_module_export( const std::string_view &module_name, const std::string_view &export_name ) noexcept
         {
-            auto module_handle = utils::get_module_handle< void * >( module_name );
+            auto module_handle = win_api::get_module_handle< void * >( module_name );
 
             if ( module_handle ) {
                 auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module_handle );
@@ -402,22 +402,22 @@ namespace syscall {
                     if ( !export_address_name )
                         continue;
 
-                    if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name ) )
+                    if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name.data( ) ) )
                         return static_cast< T >( reinterpret_cast< uintptr_t >( module_handle ) + image_function_addresses[ image_ordinal_array[ i ] ] );
                 }
             }
 
             return NULL;
         }
-    }// namespace utils
+    }// namespace win_api
 
-    SYSCALL_FORCEINLINE int32_t get_syscall_table_id( const char *module_name, const char *export_name ) noexcept
+    SYSCALL_FORCEINLINE int32_t get_syscall_table_id( const std::string_view &module_name, const std::string_view &export_name ) noexcept
     {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
         auto export_address = utils::get_module_export< uintptr_t >( module_name, export_name ) + 3;
 #else
-        auto export_address = utils::get_module_export< uintptr_t >( module_name, export_name );
+        auto export_address = win_api::get_module_export< uintptr_t >( module_name, export_name );
 #endif
 #endif
 
@@ -428,19 +428,16 @@ namespace syscall {
     }
 
     struct create_function {
-    public:
-        SYSCALL_FORCEINLINE create_function( ) = default;
-
         SYSCALL_FORCEINLINE ~create_function( ) noexcept
         {
-            VirtualFree( this->_allocated_memory, 0, MEM_DECOMMIT | MEM_RELEASE );
+            if ( _allocated_memory ) {
+                VirtualFree( _allocated_memory, 0, MEM_DECOMMIT | MEM_RELEASE );
+            }
         }
 
-        SYSCALL_FORCEINLINE create_function( const char *module_name, const char *export_name ) noexcept
+        SYSCALL_FORCEINLINE create_function( std::string_view module_name, std::string_view export_name ) noexcept
+            : _module_name( module_name ), _export_name( export_name )
         {
-            this->_module_name = module_name;
-            this->_export_name = export_name;
-
             unsigned char shellcode[ ] = {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
@@ -457,20 +454,21 @@ namespace syscall {
 #endif
             };
 
-            static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_name,
-                                                                          this->_export_name );
 
-#if _WIN32 || _WIN64
+            static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_name, this->_export_name );
+
+#if defined( _WIN32 ) || defined( _WIN64 )
 #if defined( _M_X64 )
-            memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int32_t ) );
+            std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int32_t ) );
 #else
-            memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int32_t ) );
+            std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int32_t ) );
 #endif
 #endif
-            this->_allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+            _allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
-            if ( !this->_allocated_memory )
+            if ( !this->_allocated_memory ) {
                 return;
+            }
 
             memcpy( this->_allocated_memory, shellcode, sizeof( shellcode ) );
             *reinterpret_cast< void ** >( &this->_function ) = this->_allocated_memory;
@@ -488,10 +486,9 @@ namespace syscall {
         }
 
     protected:
-        const char *_module_name;
-        const char *_export_name;
         void *_allocated_memory = nullptr;
         void *_function = nullptr;
+        std::string_view _module_name, _export_name;
     };
 
     template< typename T, typename... Args >
