@@ -330,7 +330,7 @@ namespace syscall {
     using fnv1a = hash::fnv1a< hash32_t >;
 
     namespace utils {
-        SYSCALL_FORCEINLINE win::PEB *get_peb( ) {
+        SYSCALL_FORCEINLINE win::PEB *get_peb() {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
             return reinterpret_cast< win::PEB * >( __readgsqword( 0x60 ) );
@@ -354,7 +354,7 @@ namespace syscall {
             auto peb = utils::get_peb( );
 
             if ( !peb )
-                return static_cast< type >( nullptr );
+                return static_cast< type >( 0 );
 
             auto head = &peb->LoaderData->InLoadOrderModuleList;
 
@@ -367,11 +367,11 @@ namespace syscall {
 
                 auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
-                if ( fnv1a::hash_const( name.data( ) ) == module_hash )
+                if ( fnv1a::hash_const( name.data() ) == module_hash )
                     return static_cast< type >( ldr_entry->DllBase );
             }
 
-            return static_cast< type >( nullptr );
+            return static_cast< type >( 0 );
         }
 
         template< typename type >
@@ -432,65 +432,42 @@ namespace syscall {
 
     template< typename type, typename... args >
     SYSCALL_FORCEINLINE type invoke_syscall( const char *module_name, const char *export_name, args... function_args ) {
-        using return_typedef_fn = type( __stdcall * )( args... );
-        return_typedef_fn returned_function = nullptr;
-
         auto syscall_id = get_syscall_id( module_name, export_name );
 
         if ( !syscall_id )
             return static_cast< type >( 0 );
 
+        unsigned char shellcode[ ] = {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
-        unsigned char shellcode[ ] = {
-                0x49, 0x89, 0xCA,            // mov r10, rcx
-                0xB8, 0x3F, 0x10, 0x00, 0x00,// mov eax, syscall_id
-                0x0F, 0x05,                  // syscall
-                0xC3                         // ret
+            0x49, 0x89, 0xCA,                       // mov r10, rcx
+            0xB8, 0x3F, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
+            0x0F, 0x05,                             // syscall
+            0xC3                                    // ret
+#else
+            0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
+            0x64, 0x8B,0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0
+            0xFF, 0xD2,                             // call edx
+            0xC2, 0x04, 0x00                        // ret 4
+#endif
+#endif
         };
 
+#if _WIN32 || _WIN64
+#if defined( _M_X64 )
         memcpy( &shellcode[ 4 ], &syscall_id, sizeof( int32_t ) );
-
-        auto allocated = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
-
-        if ( !allocated )
-            return static_cast< type >( 0 );
-
-        memcpy( allocated, shellcode, sizeof( shellcode ) );
-        *reinterpret_cast< void ** >( &returned_function ) = allocated;
 #else
-#ifdef SYSCALL_X86_USE_INLINE_ASM
-        __asm {
-            mov eax, syscall_id
-            mov edx, 0x10006C60
-            call edx
-            mov returned_function, edx
-            retn 4
-        }
-
-        if ( !returned_function )
-                return static_cast< type >( 0 );
-#else
-        unsigned char shellcode[ ] = {
-                0xB8, 0x00, 0x10, 0x00, 0x00,      // mov eax, syscall_id
-                0xBA, 0x60, 0x6C, 0x00, 0x10,      // mov edx, 0x10006C60
-                0xFF, 0xD2,                        // call edx
-                0x89, 0x15, 0x00, 0x00, 0x00, 0x00,// mov returned_function, edx
-                0xC2, 0x04, 0x00                   // ret 4
-        };
-
         memcpy( &shellcode[ 1 ], &syscall_id, sizeof( int32_t ) );
+#endif
+#endif
+        static auto allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
-        auto allocated = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
-
-        if ( !allocated )
+        if ( !allocated_memory )
             return static_cast< type >( 0 );
 
-        memcpy( allocated, shellcode, sizeof( shellcode ) );
-        *reinterpret_cast< void ** >( &returned_function ) = allocated;
-#endif
-#endif
-#endif
+        type( __stdcall * returned_function )( args... ) = nullptr;
+        memcpy( allocated_memory, shellcode, sizeof( shellcode ) );
+        *reinterpret_cast< void ** >( &returned_function ) = allocated_memory;
 
         return static_cast< type >( returned_function( function_args... ) );
     }
