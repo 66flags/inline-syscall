@@ -465,13 +465,13 @@ namespace syscall {
             std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int ) );
 #endif
 #endif
-            _allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+            this->_allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
 
             if ( !this->_allocated_memory ) {
                 return;
             }
 
-            memcpy( this->_allocated_memory, shellcode, sizeof( shellcode ) );
+            std::memcpy( this->_allocated_memory, shellcode, sizeof( shellcode ) );
             *reinterpret_cast< void ** >( &this->_function ) = this->_allocated_memory;
         }
 
