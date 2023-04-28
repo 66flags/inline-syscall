@@ -326,7 +326,7 @@ namespace syscall {
 
         template<>
         struct fnv1a< uint32_t > {
-            static constexpr uint32_t hash_const( const char *input, uint32_t val = fnv_offset_basis ) {
+            SYSCALL_FORCEINLINE static constexpr uint32_t hash_const( const char *input, uint32_t val = fnv_offset_basis ) {
                 return input[ 0 ] == '\0' ? val : hash_const( input + 1, ( val ^ *input ) * fnv_prime_value );
             }
         };
