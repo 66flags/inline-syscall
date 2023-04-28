@@ -1,17 +1,10 @@
+#include <windows.h>
 #include <cstdint>
 #include <direct_syscall.hpp>
-#include <iostream>
-#include <windows.h>
 
 auto main( ) -> int {
-    LoadLibraryA( "win32u.dll" );
-
-    {
-        syscall::create_function NtUserGetAsyncKeyState( "win32u.dll", "NtUserGetAsyncKeyState" );
-
-        while ( !NtUserGetAsyncKeyState.invoke< SHORT >( VK_INSERT ) )
-            std::printf( "lol\n" );
-    }
+    while ( !syscall::invoke_simple< SHORT >( "NtUserGetAsyncKeyState", VK_INSERT ) )
+        std::printf( "NtUserGetAsyncKeyState\n" );
 
     return 1;
 }

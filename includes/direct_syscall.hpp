@@ -181,14 +181,9 @@ namespace syscall {
             ULONG SessionId;
         } PEB, *PPEB;
 
-        typedef BOOLEAN( NTAPI
-                                 *PLDR_INIT_ROUTINE )(
-                _In_ PVOID
-                        DllHandle,
-                _In_ ULONG
-                        Reason,
-                _In_opt_ PVOID
-                        Context );
+        typedef BOOLEAN( NTAPI *PLDR_INIT_ROUTINE )( _In_ PVOID DllHandle,
+                                                     _In_ ULONG Reason,
+                                                     _In_opt_ PVOID Context );
 
         typedef struct _LDRP_CSLIST {
             PSINGLE_LIST_ENTRY Tail;
@@ -323,8 +318,8 @@ namespace syscall {
     }// namespace win
 
     namespace hash {
-        static constexpr uint32_t fnv_prime_value = 0x01000193;
-        static constexpr uint32_t fnv_offset_basis = 0x811c9dc5;
+        constexpr uint32_t fnv_prime_value = 0x01000193;
+        constexpr uint32_t fnv_offset_basis = 0x811c9dc5;
 
         template< typename S >
         struct fnv1a;
@@ -349,6 +344,7 @@ namespace syscall {
 #endif
 #endif
         }
+
         SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept {
             auto string = std::wstring( buffer );
 
@@ -363,7 +359,7 @@ namespace syscall {
             auto peb = utils::get_peb( );
 
             if ( !peb )
-                return static_cast< T >( 0 );
+                return NULL;
 
             auto head = &peb->LoaderData->InLoadOrderModuleList;
 
@@ -377,10 +373,10 @@ namespace syscall {
                 auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
                 if ( fnv1a::hash_const( name.data( ) ) == module_hash )
-                    return static_cast< T >( ldr_entry->DllBase );
+                    return reinterpret_cast< T >( ldr_entry->DllBase );
             }
 
-            return static_cast< T >( 0 );
+            return NULL;
         }
 
         template< typename T >
@@ -398,31 +394,30 @@ namespace syscall {
             auto module_base = utils::get_module_handle< void * >( module_name );
 
             if ( !module_base )
-                return static_cast< T >( 0 );
+                return NULL;
 
             auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module_base );
             auto nt_headers = reinterpret_cast< PIMAGE_NT_HEADERS >( reinterpret_cast< uintptr_t >( module_base ) + dos_headers->e_lfanew );
 
-            if ( nt_headers->Signature != IMAGE_NT_SIGNATURE )
-                return static_cast< T >( 0 );
+            if ( nt_headers->Signature == IMAGE_NT_SIGNATURE ) {
+                auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( reinterpret_cast< uintptr_t >( module_base ) + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
+                auto image_ordinal_array = reinterpret_cast< uint16_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfNameOrdinals );
+                auto image_function_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfFunctions );
+                auto image_name_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfNames );
 
-            auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( reinterpret_cast< uintptr_t >( module_base ) + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
-            auto image_ordinal_array = reinterpret_cast< uint16_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfNameOrdinals );
-            auto image_function_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfFunctions );
-            auto image_name_addresses = reinterpret_cast< uint32_t * >( reinterpret_cast< uintptr_t >( module_base ) + image_export_directory->AddressOfNames );
+                for ( auto i = 0; i < image_export_directory->NumberOfFunctions; i++ ) {
+                    auto export_address_name = reinterpret_cast< const char * >(
+                            reinterpret_cast< uintptr_t >( module_base ) + image_name_addresses[ i ] );
 
-            for ( auto i = 0; i < image_export_directory->NumberOfFunctions; i++ ) {
-                auto export_address_name = reinterpret_cast< const char * >(
-                        reinterpret_cast< uintptr_t >( module_base ) + image_name_addresses[ i ] );
+                    if ( !export_address_name )
+                        continue;
 
-                if ( !export_address_name )
-                    continue;
-
-                if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name ) )
-                    return static_cast< T >( reinterpret_cast< uintptr_t >( module_base ) + image_function_addresses[ image_ordinal_array[ i ] ] );
+                    if ( fnv1a::hash_const( export_address_name ) == fnv1a::hash_const( export_name ) )
+                        return static_cast< T >( reinterpret_cast< uintptr_t >( module_base ) + image_function_addresses[ image_ordinal_array[ i ] ] );
+                }
             }
 
-            return static_cast< T >( 0 );
+            return NULL;
         }
     }// namespace utils
 
@@ -436,7 +431,7 @@ namespace syscall {
 #endif
 
         if ( !exported_address )
-            return 0;
+            return NULL;
 
         return *reinterpret_cast< int32_t * >( exported_address + 1 );
     }
@@ -458,7 +453,7 @@ namespace syscall {
                 0xC3                                    // ret
 #else
                 0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
-                0x64, 0x8B,0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0
+                0x64, 0x8B,0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0 (
                 0xFF, 0xD2,                             // call edx
                 0xC2, 0x04, 0x00                        // ret 4
 #endif
@@ -483,9 +478,13 @@ namespace syscall {
             *reinterpret_cast< void ** >( &this->_function ) = allocated_memory;
         }
 
+        SYSCALL_FORCEINLINE bool is_valid( ) {
+            return this->_function != nullptr;
+        }
+
         template< typename T, typename... Args >
         SYSCALL_FORCEINLINE T invoke( Args... arguments ) noexcept {
-            return reinterpret_cast< T( __stdcall * )( Args... ) >( this->_function )( arguments... );
+            return reinterpret_cast< T ( __stdcall * )( Args... ) >( this->_function )( arguments... );
         }
 
     protected:
@@ -495,7 +494,24 @@ namespace syscall {
     };
 
     SYSCALL_FORCEINLINE syscall::create_function create( const char *module_name, const char *export_name ) noexcept {
-        return { module_name, export_name };
+        return syscall::create_function{ module_name,
+                                         export_name };
+    }
+
+    SYSCALL_FORCEINLINE syscall::create_function create( const char *export_name ) noexcept {
+        return syscall::create_function{ "win32u.dll",
+                                         export_name };
+    }
+
+    template< typename T, typename... Args >
+    SYSCALL_FORCEINLINE T invoke_simple( const char *export_name, Args... arguments ) noexcept {
+        auto syscall = syscall::create( export_name );
+
+        if ( !syscall.is_valid( ) ) {
+            return NULL;
+        }
+
+        return syscall.invoke< T >( arguments... );
     }
 }// namespace syscall
 
