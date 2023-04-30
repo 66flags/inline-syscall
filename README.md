@@ -16,13 +16,14 @@ Compile using MSVC not tested with clang or LLVM yet.
 
 Single line example with "NtUserGetAsyncKeyState"
 ```cpp
-    syscall::invoke_simple<SHORT>("NtUserGetAsyncKeyState", VK_INSERT);
+    INVOKE_SYSCALL(SHORT, NtUserGetAsyncKeyState, VK_INSERT);
 ```
 
-Another example if you don't want to create a syscall again.
+Another example if you don't want to create a syscall over again.
 
 ```cpp
-    syscall::create_function syscall_test("win32u.dll", "NtUserGetAsyncKeyState");
-    
-    syscall_test.invoke<SHORT>(VK_INSERT);
+    syscall::create_function syscall_test(DS_HASH_CT("win32u.dll"), 
+                                          DS_HASH_CT("NtUserGetAsyncKeyState"));
+
+    syscall_test.invoke_call<SHORT>(VK_INSERT);
 ```
