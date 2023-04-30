@@ -27,3 +27,7 @@ Another example if you don't want to create a syscall over again.
 
     syscall_test.invoke_call<SHORT>(VK_INSERT);
 ```
+
+## Decompiler output
+Compile time string "encryption" included.
+![](https://i.imgur.com/XQUspS2.png)
