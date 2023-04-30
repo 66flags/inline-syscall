@@ -17,16 +17,31 @@
 #include <memory>
 
 #define DS_HASH_CT( str )                                             \
-    [ ]( ) {                                                          \
+    [ ]( ) [[ msvc::forceinline ]]                                    \
+    {                                                                 \
         constexpr uint32_t out = ::syscall::fnv1a::hash_ctime( str ); \
+                                                                      \
         return out;                                                   \
     }( )
 
-#define INVOKE_SYSCALL( type, export_name, ... )                            \
-    constexpr uint32_t name = ::syscall::fnv1a::hash_ctime( #export_name ); \
-    syscall::invoke_simple< type >( name, __VA_ARGS__ );
-
 #define DS_HASH( str ) ::syscall::fnv1a::hash_rtime( str )
+
+#define INVOKE_SYSCALL_SIMPLE( type, export_name, ... )                         \
+    SYSCALL_FORCEINLINE[ & ]( ) [[ msvc::forceinline ]]                         \
+    {                                                                           \
+        constexpr uint32_t name = ::syscall::fnv1a::hash_ctime( #export_name ); \
+                                                                                \
+        return syscall::invoke_simple< type >( name, __VA_ARGS__ );             \
+    }( )
+
+#define INVOKE_SYSCALL_SIMPLE( type, module_name, export_name, ... )                    \
+    [ & ]( ) [[ msvc::forceinline ]]                                                    \
+    {                                                                                   \
+        constexpr uint32_t export_hash = ::syscall::fnv1a::hash_ctime( #export_name );  \
+        constexpr uint32_t module_hash = ::syscall::fnv1a::hash_ctime( module_name );   \
+                                                                                        \
+        return syscall::invoke_simple< type >( module_hash, export_hash, __VA_ARGS__ ); \
+    }( )
 
 namespace syscall {
     namespace win {
@@ -305,29 +320,33 @@ namespace syscall {
         constexpr uint32_t fnv_offset_basis = 0x811c9dc5;
 
         // only use these for compile-time hashing.
-        consteval uint32_t hash_ctime( const char *input, uint32_t val = fnv_offset_basis ) {
+        consteval uint32_t hash_ctime( const char *input, uint32_t val = fnv_offset_basis )
+        {
             return input[ 0 ] == '\0' ? val : hash_ctime( input + 1, ( val ^ *input ) * fnv_prime_value );
         }
 
         // only used for comparing strings, etc during runtime.
-        constexpr uint32_t hash_rtime( const char *input, uint32_t val = fnv_offset_basis ) {
+        constexpr uint32_t hash_rtime( const char *input, uint32_t val = fnv_offset_basis )
+        {
             return input[ 0 ] == '\0' ? val : hash_rtime( input + 1, ( val ^ *input ) * fnv_prime_value );
         }
     }// namespace fnv1a
 
     namespace utils {
-        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept {
+        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept
+        {
             auto string = std::wstring( buffer );
 
             if ( string.empty( ) )
                 return "";
 
-            return std::string( string.begin( ), string.end( )  );
+            return std::string( string.begin( ), string.end( ) );
         }
     }// namespace utils
 
     namespace win_utils {
-        SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept {
+        SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept
+        {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
             return reinterpret_cast< win::PEB * >( __readgsqword( 0x60 ) );
@@ -338,7 +357,8 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept {
+        SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept
+        {
             auto peb = win_utils::get_peb( );
 
             if ( !peb )
@@ -362,7 +382,8 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle( uint32_t module_hash ) noexcept {
+        SYSCALL_FORCEINLINE T get_module_handle( uint32_t module_hash ) noexcept
+        {
             auto peb = win_utils::get_peb( );
 
             if ( !module_hash )
@@ -372,7 +393,8 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_export( uint32_t module_hash, const uint32_t &export_hash ) noexcept {
+        SYSCALL_FORCEINLINE T get_module_export( uint32_t module_hash, const uint32_t &export_hash ) noexcept
+        {
             auto module_address = win_utils::get_module_handle< uintptr_t >(
                     module_hash );
 
@@ -402,9 +424,10 @@ namespace syscall {
 
             return NULL;
         }
-    }// namespace winapi_utils
+    }// namespace win_utils
 
-    SYSCALL_FORCEINLINE int get_syscall_table_id( const uint32_t &module_hash, const uint32_t &export_hash ) noexcept {
+    SYSCALL_FORCEINLINE int get_syscall_table_id( const uint32_t &module_hash, const uint32_t &export_hash ) noexcept
+    {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
         auto export_address = win_utils::get_module_export< uintptr_t >( module_hash, export_hash ) + 3;
@@ -421,14 +444,16 @@ namespace syscall {
 
     struct create_function {
     public:
-        SYSCALL_FORCEINLINE ~create_function( ) noexcept {
+        SYSCALL_FORCEINLINE ~create_function( ) noexcept
+        {
             if ( this->_allocated_memory ) {
                 VirtualFree( this->_allocated_memory, 0, MEM_RELEASE | MEM_DECOMMIT );
             }
         }
 
         SYSCALL_FORCEINLINE create_function( uint32_t module_hash, uint32_t export_hash ) noexcept
-            : _module_hash( module_hash ), _export_hash( export_hash ) {
+            : _module_hash( module_hash ), _export_hash( export_hash )
+        {
             static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_hash,
                                                                           this->_export_hash );
 
@@ -465,12 +490,14 @@ namespace syscall {
             *reinterpret_cast< void ** >( &this->_function ) = this->_allocated_memory;
         }
 
-        SYSCALL_FORCEINLINE bool is_valid( ) {
+        SYSCALL_FORCEINLINE bool is_valid( )
+        {
             return this->_function != nullptr;
         }
 
         template< typename T, typename... Args >
-        SYSCALL_FORCEINLINE T invoke_call( Args... arguments ) noexcept {
+        SYSCALL_FORCEINLINE T invoke_call( Args... arguments ) noexcept
+        {
             return reinterpret_cast< T( __stdcall * )( Args... ) >( this->_function )( arguments... );
         }
 
@@ -482,8 +509,22 @@ namespace syscall {
     };
 
     template< typename T, typename... Args >
-    SYSCALL_FORCEINLINE T invoke_simple( uint32_t export_hash, Args... arguments ) noexcept {
+    SYSCALL_FORCEINLINE T invoke_simple( uint32_t export_hash, Args... arguments ) noexcept
+    {
         static auto syscall_fn = ::syscall::create_function{ DS_HASH_CT( "win32u.dll" ),
+                                                             export_hash };
+
+        if ( !syscall_fn.is_valid( ) ) {
+            return NULL;
+        }
+
+        return syscall_fn.invoke_call< T >( arguments... );
+    }
+
+    template< typename T, typename... Args >
+    SYSCALL_FORCEINLINE T invoke_simple( uint32_t module_hash, uint32_t export_hash, Args... arguments ) noexcept
+    {
+        static auto syscall_fn = ::syscall::create_function{ module_hash,
                                                              export_hash };
 
         if ( !syscall_fn.is_valid( ) ) {
