@@ -17,6 +17,17 @@ Compile using MSVC not tested with clang or LLVM yet.
 ```cpp
     INVOKE_SYSCALL_SIMPLE( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
 ```
+
+
+Another example if you don't want to create a syscall over again.
+
+```cpp
+    syscall::create_function syscall_test( DS_HASH_CT( "win32u.dll" ), 
+                                           DS_HASH_CT( "NtUserGetAsyncKeyState" ) );
+
+    syscall_test.invoke_call< SHORT >( VK_INSERT );
+```
+
 <b>NOTE: </b> This library does not automatically find an exported function without specifying a module with a syscall table.
 
 Another example but for reading process memory.
@@ -50,14 +61,7 @@ auto main( int argc, char **argv ) -> int
 }
 ```
 
-Another example if you don't want to create a syscall over again.
-
-```cpp
-    syscall::create_function syscall_test( DS_HASH_CT( "win32u.dll" ), 
-                                           DS_HASH_CT( "NtUserGetAsyncKeyState" ) );
-
-    syscall_test.invoke_call< SHORT >( VK_INSERT );
-```
+As expected, it prints out 420...
 
 ## Decompiler output
 Compile time string "encryption" included.
