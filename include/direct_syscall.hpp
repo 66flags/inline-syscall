@@ -409,7 +409,7 @@ namespace syscall {
 #if defined( _M_X64 )
         auto export_address = win_utils::get_module_export< uintptr_t >( module_hash, export_hash ) + 3;
 #else
-        auto export_address = winapi_utils::get_module_export< uintptr_t >( module_hash, export_hash );
+        auto export_address = win_utils::get_module_export< uintptr_t >( module_hash, export_hash );
 #endif
 #endif
 
