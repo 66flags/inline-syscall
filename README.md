@@ -82,7 +82,7 @@ auto main( int argc, char **argv ) -> int
 
 Code provided is a simple benchmarking test for "NtUserGetAsyncKeyState" which managed to finish executing within 3 milliseconds.
 ```
-NtUserGetAsyncKeyState completed in 1ms
+NtUserGetAsyncKeyState completed in 1ms or 0.655ms
 ```
 
 ## Decompiler output
