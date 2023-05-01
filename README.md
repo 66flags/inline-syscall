@@ -66,23 +66,35 @@ As expected, it prints out 420...
 auto main( int argc, char **argv ) -> int
 {
     auto start = std::chrono::high_resolution_clock::now( );
+    
+    int read_int = 0;
+    int * address = &lol;
+    *reinterpret_cast< int* >( address ) = 420;
 
-    // make syscall.
-    INVOKE_SYSCALL( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
+    size_t sizeof_bytes = 0;
+
+    auto hi = INVOKE_SYSCALL( NTSTATUS,
+                              ZwReadVirtualMemory,
+                              GetCurrentProcess( ),
+                              address,
+                              &read_int,
+                              sizeof( int ), &sizeof_bytes );
 
     auto end = std::chrono::high_resolution_clock::now( );
-    auto elapsed_time = duration_cast< std::chrono::milliseconds >( end - start ).count( );
+    auto elapsed_time = duration_cast< std::chrono::microseconds >( end - start ).count( );
 
     // print out elapsed time after computation.
-    std::printf( "Syscall completed in %dms\n", elapsed_time );
+    std::printf( "ZwReadVirtualMemory completed in %d microseconds\n", elapsed_time );
 
     return 1;
 }
 ```
 
-Code provided is a simple benchmarking test for "NtUserGetAsyncKeyState" which managed to finish executing within 3 milliseconds.
+Code provided is a simple benchmarking test for "ZwReadVirtualMemory" or "NtReadVirtualMemory" which managed to finish executing within 80 microseconds.
+
+<b>Console output </b>
 ```
-NtUserGetAsyncKeyState completed in 1ms or 0.655ms
+ZwReadVirtualMemory completed in 1ms or 0.80ms
 ```
 
 ## Decompiler output
