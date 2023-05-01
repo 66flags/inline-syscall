@@ -67,12 +67,14 @@ auto main( int argc, char **argv ) -> int
 {
     auto start = std::chrono::high_resolution_clock::now( );
 
+    // make syscall.
     INVOKE_SYSCALL( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
 
     auto end = std::chrono::high_resolution_clock::now( );
-    auto time = duration_cast< std::chrono::milliseconds >( end - start ).count( );
+    auto elapsed_time = duration_cast< std::chrono::milliseconds >( end - start ).count( );
 
-    printf( "NtUserGetAsyncKeyState completed in %dms\n", time );
+    // print out elapsed time after computation.
+    std::printf( "Syscall completed in %dms\n", elapsed_time );
 
     return 1;
 }
@@ -80,7 +82,7 @@ auto main( int argc, char **argv ) -> int
 
 Code provided is a simple benchmarking test for "NtUserGetAsyncKeyState" which managed to finish executing within 3 milliseconds.
 ```
-NtUserGetAsyncKeyState completed in 3ms
+NtUserGetAsyncKeyState completed in 1ms
 ```
 
 ## Decompiler output
