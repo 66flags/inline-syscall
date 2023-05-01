@@ -338,12 +338,10 @@ namespace syscall {
     namespace win {
         SYSCALL_FORCEINLINE nt::PEB *get_peb( ) noexcept
         {
-#if _WIN32 || _WIN64
-#if defined( _M_X64 )
-            return reinterpret_cast< nt::PEB * >( __readgsqword( 0x60 ) );
-#else
+#if defined( _M_IX86 ) || defined( __i386__ )
             return reinterpret_cast< nt::PEB * >( __readfsdword( 0x30 ) );
-#endif
+#else
+            return reinterpret_cast< nt::PEB * >( __readgsqword( 0x60 ) );
 #endif
         }
 
@@ -454,13 +452,7 @@ namespace syscall {
         if ( !export_address )
             return NULL;
 
-#if _WIN32 || _WIN64
-#if defined( _M_X64 )
-        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 3 ) + 1 );
-#else
         return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 12 ) + 1 );
-#endif
-#endif
     }
 
     SYSCALL_FORCEINLINE int get_syscall_id_from_export( uintptr_t export_address ) noexcept
@@ -468,12 +460,10 @@ namespace syscall {
         if ( !export_address )
             return NULL;
 
-#if _WIN32 || _WIN64
-#if defined( _M_X64 )
-        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 3 ) + 1 );
-#else
+#if defined( _M_IX86 ) || defined( __i386__ )
         return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address ) + 1 );
-#endif
+#else
+        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 3 ) + 1 );
 #endif
     }
 
@@ -495,41 +485,37 @@ namespace syscall {
             : _export_hash( export_hash )
         {
 
-            static auto exported_address = ::syscall::win::force_find_export< uintptr_t >(
-                    this->_export_hash );
+            static auto exported_address = ::syscall::win::force_find_export< uintptr_t >( this->_export_hash );
+            static auto syscall_table_id = ::syscall::get_syscall_id_from_export( exported_address );
 
-            if ( !exported_address )
+            if ( !!exported_address || !syscall_table_id )
                 return;
 
             unsigned char shellcode[ ] =
             {
-#if _WIN32 || _WIN64
-#if defined( _M_X64 )
-                0x49, 0x89, 0xCA,                       // mov r10, rcx
-                0xB8, 0x3F, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
-                0x0F, 0x05,                             // syscall
-                0xC3                                    // ret
-#else
+#if defined( _M_IX86 ) || defined( __i386__ )
                 0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
                 0x64, 0x8B, 0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0 (
                 0xFF, 0xD2,                             // call edx
                 0xC2, 0x04, 0x00                        // ret 4
-#endif
+#else
+                0x49, 0x89, 0xCA,                       // mov r10, rcx
+                0xB8, 0x3F, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
+                0x0F, 0x05,                             // syscall
+                0xC3                                    // ret
 #endif
             };
 
-            static auto syscall_table_id = ::syscall::get_syscall_id_from_export( exported_address );
-            static auto syscall_return_code = ::syscall::get_return_code_from_export( exported_address );
-
-#if defined( _WIN32 ) || defined( _WIN64 )
-#if defined( _M_X64 )
-            std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int ) );
-#else
-            std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int ) );
-
-            // only required for x86.
-            std::memcpy( &shellcode[ 15 ], &syscall_return_code, sizeof( uint16_t ) );
+#if defined( _M_IX86 ) || defined( __i386__ )
+            static auto syscall_return_code = ::syscall::get_return_code_from_export(
+                    exported_address );
 #endif
+
+#if defined( _M_IX86 ) || defined( __i386__ )
+            std::memcpy( &shellcode[ 15 ], &syscall_return_code, sizeof( uint16_t ) );
+            std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int ) );
+#else
+            std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int ) );
 #endif
             this->_allocated_memory = VirtualAlloc( nullptr,
                                                     sizeof( shellcode ),
