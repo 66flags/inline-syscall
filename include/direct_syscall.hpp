@@ -16,35 +16,26 @@
 #include <intrin.h>
 #include <memory>
 
-#define DS_HASH_CT( str )                                             \
-    [ ]( ) [[ msvc::forceinline ]]                                    \
+#define SYSCALL_HASH_CT( str )                                        \
+    [ ]( ) [[msvc::forceinline]]                                      \
     {                                                                 \
         constexpr uint32_t out = ::syscall::fnv1a::hash_ctime( str ); \
                                                                       \
         return out;                                                   \
     }( )
 
-#define DS_HASH( str ) ::syscall::fnv1a::hash_rtime( str )
+#define SYSCALL_HASH( str ) ::syscall::fnv1a::hash_rtime( str )
 
-#define INVOKE_SYSCALL_SIMPLE( type, export_name, ... )                         \
-    SYSCALL_FORCEINLINE[ & ]( ) [[ msvc::forceinline ]]                         \
+#define INVOKE_SYSCALL( type, export_name, ... )                                \
+    [ & ]( ) [[msvc::forceinline]]                                              \
     {                                                                           \
         constexpr uint32_t name = ::syscall::fnv1a::hash_ctime( #export_name ); \
                                                                                 \
         return syscall::invoke_simple< type >( name, __VA_ARGS__ );             \
     }( )
 
-#define INVOKE_SYSCALL_SIMPLE( type, module_name, export_name, ... )                    \
-    [ & ]( ) [[ msvc::forceinline ]]                                                    \
-    {                                                                                   \
-        constexpr uint32_t export_hash = ::syscall::fnv1a::hash_ctime( #export_name );  \
-        constexpr uint32_t module_hash = ::syscall::fnv1a::hash_ctime( module_name );   \
-                                                                                        \
-        return syscall::invoke_simple< type >( module_hash, export_hash, __VA_ARGS__ ); \
-    }( )
-
 namespace syscall {
-    namespace win {
+    namespace nt {
         struct UNICODE_STRING {
             uint16_t Length;
             uint16_t MaximumLength;
@@ -313,7 +304,7 @@ namespace syscall {
             PVOID ActivePatchImageBase;
             uintptr_t HotPatchState;
         } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
-    }// namespace win
+    }// namespace nt
 
     namespace fnv1a {
         constexpr uint32_t fnv_prime_value = 0x01000193;
@@ -344,22 +335,22 @@ namespace syscall {
         }
     }// namespace utils
 
-    namespace win_utils {
-        SYSCALL_FORCEINLINE win::PEB *get_peb( ) noexcept
+    namespace win {
+        SYSCALL_FORCEINLINE nt::PEB *get_peb( ) noexcept
         {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
-            return reinterpret_cast< win::PEB * >( __readgsqword( 0x60 ) );
+            return reinterpret_cast< nt::PEB * >( __readgsqword( 0x60 ) );
 #else
-            return reinterpret_cast< win::PEB * >( __readfsdword( 0x30 ) );
+            return reinterpret_cast< nt::PEB * >( __readfsdword( 0x30 ) );
 #endif
 #endif
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept
+        static SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept
         {
-            auto peb = win_utils::get_peb( );
+            auto peb = win::get_peb( );
 
             if ( !peb )
                 return NULL;
@@ -367,14 +358,14 @@ namespace syscall {
             auto head = &peb->LoaderData->InLoadOrderModuleList;
 
             for ( auto it = head->Flink; it != head; it = it->Flink ) {
-                win::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it, win::LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
+                nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it, nt::LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
 
                 if ( !ldr_entry->BaseDllName.Buffer )
                     continue;
 
                 auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
 
-                if ( DS_HASH( name.data( ) ) == module_hash )
+                if ( SYSCALL_HASH( name.data( ) ) == module_hash )
                     return reinterpret_cast< T >( ldr_entry->DllBase );
             }
 
@@ -382,82 +373,136 @@ namespace syscall {
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_handle( uint32_t module_hash ) noexcept
+        static SYSCALL_FORCEINLINE T get_module_export_from_table( uintptr_t module_address,
+                                                                   const uint32_t &export_hash ) noexcept
         {
-            auto peb = win_utils::get_peb( );
+            auto dos_headers = reinterpret_cast< IMAGE_DOS_HEADER * >( module_address );
 
-            if ( !module_hash )
-                return reinterpret_cast< T >( peb->ImageBaseAddress );
+            if ( dos_headers->e_magic != IMAGE_DOS_SIGNATURE )
+                return NULL;
 
-            return win_utils::get_module_handle_from_hash< T >( module_hash );
+            auto nt_headers32 = reinterpret_cast< PIMAGE_NT_HEADERS32 >( module_address + dos_headers->e_lfanew );
+            auto nt_headers64 = reinterpret_cast< PIMAGE_NT_HEADERS64 >( module_address + dos_headers->e_lfanew );
+
+            PIMAGE_OPTIONAL_HEADER32 optional_header32 = &nt_headers32->OptionalHeader;
+            PIMAGE_OPTIONAL_HEADER64 optional_header64 = &nt_headers64->OptionalHeader;
+
+            PIMAGE_EXPORT_DIRECTORY export_directory = nullptr;
+
+            if ( nt_headers32->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC ) {
+                if ( optional_header32->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].Size <= 0U )
+                    return NULL;
+
+                export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( module_address + optional_header32->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
+            } else if ( nt_headers64->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC ) {
+                if ( optional_header64->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].Size <= 0U )
+                    return NULL;
+
+                export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( module_address + optional_header64->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
+            }
+
+            auto names_rva = reinterpret_cast< uint32_t * >( module_address + export_directory->AddressOfNames );
+            auto functions_rva = reinterpret_cast< uint32_t * >( module_address + export_directory->AddressOfFunctions );
+            auto name_ordinals = reinterpret_cast< unsigned short * >( module_address + export_directory->AddressOfNameOrdinals );
+
+            uint32_t number_of_names = export_directory->NumberOfNames;
+
+            for ( size_t i = 0; i < number_of_names; i++ ) {
+                const char *export_name = reinterpret_cast< const char * >( module_address + names_rva[ i ] );
+
+                if ( export_hash == SYSCALL_HASH( export_name ) )
+                    return static_cast< T >( module_address + functions_rva[ name_ordinals[ i ] ] );
+            }
+
+            return 0x0;
         }
 
         template< typename T >
-        SYSCALL_FORCEINLINE T get_module_export( uint32_t module_hash, const uint32_t &export_hash ) noexcept
+        SYSCALL_FORCEINLINE T force_find_export( const uint32_t &export_hash ) noexcept
         {
-            auto module_address = win_utils::get_module_handle< uintptr_t >(
-                    module_hash );
+            auto peb = ::syscall::win::get_peb( );
 
-            if ( !module_address )
+            if ( !peb || !export_hash )
                 return NULL;
 
-            auto dos_headers = reinterpret_cast< PIMAGE_DOS_HEADER >( module_address );
-            auto nt_headers = reinterpret_cast< PIMAGE_NT_HEADERS >( module_address + dos_headers->e_lfanew );
+            auto head = &peb->LoaderData->InLoadOrderModuleList;
 
-            if ( nt_headers->Signature != IMAGE_NT_SIGNATURE )
-                return NULL;
+            for ( auto it = head->Flink; it != head; it = it->Flink ) {
+                nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it,
+                                                                          nt::LDR_DATA_TABLE_ENTRY,
+                                                                           InLoadOrderLinks );
 
-            auto image_export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( module_address + nt_headers->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
-            auto image_ordinal_array = reinterpret_cast< uint16_t * >( module_address + image_export_directory->AddressOfNameOrdinals );
-            auto image_function_addresses = reinterpret_cast< uint32_t * >( module_address + image_export_directory->AddressOfFunctions );
-            auto image_name_addresses = reinterpret_cast< uint32_t * >( module_address + image_export_directory->AddressOfNames );
-
-            for ( DWORD i = 0; i < image_export_directory->NumberOfFunctions; i++ ) {
-                auto export_address_name = reinterpret_cast< const char * >( module_address + image_name_addresses[ i ] );
-
-                if ( !export_address_name )
+                if ( !ldr_entry->BaseDllName.Buffer )
                     continue;
 
-                if ( DS_HASH( export_address_name ) == export_hash )
-                    return static_cast< T >( module_address + image_function_addresses[ image_ordinal_array[ i ] ] );
+                auto name = ::syscall::utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
+
+                auto export_address = ::syscall::win::get_module_export_from_table< uintptr_t >(
+                        reinterpret_cast< uintptr_t >( ldr_entry->DllBase ),
+                        export_hash );
+
+                if ( !export_address )
+                    continue;
+
+                return static_cast< T >( export_address );
             }
-
-            return NULL;
         }
-    }// namespace win_utils
+    }// namespace win
 
-    SYSCALL_FORCEINLINE int get_syscall_table_id( const uint32_t &module_hash, const uint32_t &export_hash ) noexcept
+    SYSCALL_FORCEINLINE uint16_t get_return_code_from_export( uintptr_t export_address ) noexcept
     {
-#if _WIN32 || _WIN64
-#if defined( _M_X64 )
-        auto export_address = win_utils::get_module_export< uintptr_t >( module_hash, export_hash ) + 3;
-#else
-        auto export_address = win_utils::get_module_export< uintptr_t >( module_hash, export_hash );
-#endif
-#endif
-
         if ( !export_address )
             return NULL;
 
-        return *reinterpret_cast< int * >( export_address + 1 );
+#if _WIN32 || _WIN64
+#if defined( _M_X64 )
+        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 3 ) + 1 );
+#else
+        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 12 ) + 1 );
+#endif
+#endif
+    }
+
+    SYSCALL_FORCEINLINE int get_syscall_id_from_export( uintptr_t export_address ) noexcept
+    {
+        if ( !export_address )
+            return NULL;
+
+#if _WIN32 || _WIN64
+#if defined( _M_X64 )
+        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 3 ) + 1 );
+#else
+        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address ) + 1 );
+#endif
+#endif
     }
 
     struct create_function {
+        void *_allocated_memory = nullptr;
+        void *_function = nullptr;
+        uint32_t _export_hash;
+
     public:
         SYSCALL_FORCEINLINE ~create_function( ) noexcept
         {
             if ( this->_allocated_memory ) {
-                VirtualFree( this->_allocated_memory, 0, MEM_RELEASE | MEM_DECOMMIT );
+                VirtualFree( this->_allocated_memory, 0, MEM_RELEASE );
+                this->_allocated_memory = nullptr;
             }
         }
 
-        SYSCALL_FORCEINLINE create_function( uint32_t module_hash, uint32_t export_hash ) noexcept
-            : _module_hash( module_hash ), _export_hash( export_hash )
+        SYSCALL_FORCEINLINE create_function( uint32_t export_hash ) noexcept
+            : _export_hash( export_hash )
         {
-            static auto syscall_table_id = syscall::get_syscall_table_id( this->_module_hash,
-                                                                          this->_export_hash );
 
-            unsigned char shellcode[ ] = {
+            static auto exported_address = ::syscall::win::force_find_export< uintptr_t >(
+                    this->_export_hash );
+
+            if ( !exported_address )
+                return;
+
+            unsigned char shellcode[ ] =
+            {
 #if _WIN32 || _WIN64
 #if defined( _M_X64 )
                 0x49, 0x89, 0xCA,                       // mov r10, rcx
@@ -466,21 +511,30 @@ namespace syscall {
                 0xC3                                    // ret
 #else
                 0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
-                0x64, 0x8B,0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0 (
+                0x64, 0x8B, 0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0 (
                 0xFF, 0xD2,                             // call edx
                 0xC2, 0x04, 0x00                        // ret 4
 #endif
 #endif
             };
 
+            static auto syscall_table_id = ::syscall::get_syscall_id_from_export( exported_address );
+            static auto syscall_return_code = ::syscall::get_return_code_from_export( exported_address );
+
 #if defined( _WIN32 ) || defined( _WIN64 )
 #if defined( _M_X64 )
             std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int ) );
 #else
             std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int ) );
+
+            // only required for x86.
+            std::memcpy( &shellcode[ 15 ], &syscall_return_code, sizeof( uint16_t ) );
 #endif
 #endif
-            this->_allocated_memory = VirtualAlloc( nullptr, sizeof( shellcode ), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+            this->_allocated_memory = VirtualAlloc( nullptr,
+                                                    sizeof( shellcode ),
+                                                    MEM_COMMIT | MEM_RESERVE,
+                                                    PAGE_EXECUTE_READWRITE );
 
             if ( !this->_allocated_memory ) {
                 return;
@@ -490,7 +544,7 @@ namespace syscall {
             *reinterpret_cast< void ** >( &this->_function ) = this->_allocated_memory;
         }
 
-        SYSCALL_FORCEINLINE bool is_valid( )
+        SYSCALL_FORCEINLINE bool is_valid_address( ) noexcept
         {
             return this->_function != nullptr;
         }
@@ -500,34 +554,14 @@ namespace syscall {
         {
             return reinterpret_cast< T( __stdcall * )( Args... ) >( this->_function )( arguments... );
         }
-
-    protected:
-        void *_allocated_memory = nullptr;
-        void *_function = nullptr;
-
-        uint32_t _module_hash{}, _export_hash{};
     };
 
     template< typename T, typename... Args >
     SYSCALL_FORCEINLINE T invoke_simple( uint32_t export_hash, Args... arguments ) noexcept
     {
-        static auto syscall_fn = ::syscall::create_function{ DS_HASH_CT( "win32u.dll" ),
-                                                             export_hash };
+        static auto syscall_fn = ::syscall::create_function( export_hash );
 
-        if ( !syscall_fn.is_valid( ) ) {
-            return NULL;
-        }
-
-        return syscall_fn.invoke_call< T >( arguments... );
-    }
-
-    template< typename T, typename... Args >
-    SYSCALL_FORCEINLINE T invoke_simple( uint32_t module_hash, uint32_t export_hash, Args... arguments ) noexcept
-    {
-        static auto syscall_fn = ::syscall::create_function{ module_hash,
-                                                             export_hash };
-
-        if ( !syscall_fn.is_valid( ) ) {
+        if ( !syscall_fn.is_valid_address( ) ) {
             return NULL;
         }
 

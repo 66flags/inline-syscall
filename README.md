@@ -15,15 +15,14 @@ Compile using MSVC not tested with clang or LLVM yet.
 
 
 ```cpp
-    INVOKE_SYSCALL_SIMPLE( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
+    INVOKE_SYSCALL( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
 ```
 
 
 Another example if you don't want to create a syscall over again.
 
 ```cpp
-    syscall::create_function syscall_test( DS_HASH_CT( "win32u.dll" ), 
-                                           DS_HASH_CT( "NtUserGetAsyncKeyState" ) );
+    syscall::create_function syscall_test( SYSCALL_HASH_CT( "NtUserGetAsyncKeyState" ) );
 
     syscall_test.invoke_call< SHORT >( VK_INSERT );
 ```
@@ -33,7 +32,7 @@ Another example if you don't want to create a syscall over again.
 Another example but for reading process memory.
 
 ```cpp
-#include <direct_syscall.hpp>
+#include "direct_syscall.hpp"
 #include <iostream>
 #include <memoryapi.h>
 
@@ -47,13 +46,12 @@ auto main( int argc, char **argv ) -> int
 
     size_t sizeof_bytes = 0;
 
-    auto hi = INVOKE_SYSCALL_SIMPLE( NTSTATUS,
-                                     "ntdll.dll",
-                                     ZwReadVirtualMemory,
-                                     GetCurrentProcess( ),
-                                     address,
-                                     &read_int,
-                                     sizeof( int ), &sizeof_bytes );
+    auto hi = INVOKE_SYSCALL( NTSTATUS,
+                              ZwReadVirtualMemory,
+                              GetCurrentProcess( ),
+                              address,
+                              &read_int,
+                              sizeof( int ), &sizeof_bytes );
 
     printf( "%d", read_int );
 
@@ -63,6 +61,31 @@ auto main( int argc, char **argv ) -> int
 
 As expected, it prints out 420...
 
+## Benchmarking
+```cpp
+auto main( int argc, char **argv ) -> int
+{
+    auto start = std::chrono::high_resolution_clock::now( );
+
+    INVOKE_SYSCALL( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
+
+    auto end = std::chrono::high_resolution_clock::now( );
+    auto time = duration_cast< std::chrono::milliseconds >( end - start ).count( );
+
+    printf( "NtUserGetAsyncKeyState completed in %dms\n", time );
+
+    return 1;
+}
+```
+
+Code provided is a simple benchmarking test for "NtUserGetAsyncKeyState" which managed to finish executing within 3 milliseconds.
+```
+NtUserGetAsyncKeyState completed in 3ms
+```
+
 ## Decompiler output
 Compile time string "encryption" included.
 ![](https://i.imgur.com/XQUspS2.png)
+
+## Issues
+If you encounter any issues or crashes within this library make sure to report it to [issues](https://github.com/linux-pe/direct-syscall/issues).
