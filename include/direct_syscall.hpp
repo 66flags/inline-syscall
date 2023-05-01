@@ -379,20 +379,22 @@ namespace syscall {
             if ( dos_headers->e_magic != IMAGE_DOS_SIGNATURE )
                 return NULL;
 
+            PIMAGE_EXPORT_DIRECTORY export_directory = nullptr;
+
             auto nt_headers32 = reinterpret_cast< PIMAGE_NT_HEADERS32 >( module_address + dos_headers->e_lfanew );
             auto nt_headers64 = reinterpret_cast< PIMAGE_NT_HEADERS64 >( module_address + dos_headers->e_lfanew );
 
             PIMAGE_OPTIONAL_HEADER32 optional_header32 = &nt_headers32->OptionalHeader;
             PIMAGE_OPTIONAL_HEADER64 optional_header64 = &nt_headers64->OptionalHeader;
 
-            PIMAGE_EXPORT_DIRECTORY export_directory = nullptr;
-
             if ( nt_headers32->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC ) {
+                // does not have a export table.
                 if ( optional_header32->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].Size <= 0U )
                     return NULL;
 
                 export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( module_address + optional_header32->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
             } else if ( nt_headers64->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC ) {
+                // does not have a export table.
                 if ( optional_header64->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].Size <= 0U )
                     return NULL;
 
@@ -412,7 +414,7 @@ namespace syscall {
                     return static_cast< T >( module_address + functions_rva[ name_ordinals[ i ] ] );
             }
 
-            return 0x0;
+            return NULL;
         }
 
         template< typename T >
