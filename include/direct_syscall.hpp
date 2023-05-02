@@ -199,7 +199,7 @@ namespace syscall {
     namespace fnv1a {
         constexpr uint32_t fnv_prime_value = 0x01000193;
 
-        consteval uint32_t hash_ctime(const char *input, unsigned val = 0x811c9dc5 ^ ::syscall::xor_key_offset) noexcept
+        SYSCALL_FORCEINLINE consteval uint32_t hash_ctime(const char *input, unsigned val = 0x811c9dc5 ^ ::syscall::xor_key_offset) noexcept
         {
             return input[0] == '\0' ? val : hash_ctime(input + 1, (val ^ *input) * fnv_prime_value);
         }
