@@ -78,6 +78,23 @@ namespace syscall {
             ULONG            Size;
         } PEB_FREE_BLOCK, *PPEB_FREE_BLOCK;
 
+        typedef struct _LDR_DATA_TABLE_ENTRY {
+            LIST_ENTRY     InLoadOrderLinks;
+            LIST_ENTRY     InMemoryOrderLinks;
+            PVOID          Reserved2[2];
+            PVOID          DllBase;
+            PVOID          EntryPoint;
+            PVOID          Reserved3;
+            UNICODE_STRING FullDllName;
+            UNICODE_STRING BaseDllName;
+            PVOID          Reserved5[3];
+            union {
+                ULONG      CheckSum;
+                PVOID      Reserved6;
+            };
+            ULONG          TimeDateStamp;
+        } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
+
         typedef struct _RTL_DRIVE_LETTER_CURDIR {
             USHORT         Flags;
             USHORT         Length;
@@ -173,54 +190,40 @@ namespace syscall {
             BYTE                        TlsExpansionBitmapBits[0x80];
             ULONG                       SessionId;
         } PEB, *PPEB;
-
-        typedef struct _LDR_DATA_TABLE_ENTRY {
-            LIST_ENTRY     InLoadOrderLinks;
-            LIST_ENTRY     InMemoryOrderLinks;
-            PVOID          Reserved2[2];
-            PVOID          DllBase;
-            PVOID          EntryPoint;
-            PVOID          Reserved3;
-            UNICODE_STRING FullDllName;
-            UNICODE_STRING BaseDllName;
-            PVOID          Reserved5[3];
-            union {
-                ULONG      CheckSum;
-                PVOID      Reserved6;
-            };
-            ULONG          TimeDateStamp;
-        } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
     }// namespace nt
 
-    constexpr uint32_t xor_key_1 = __TIME__[2];
-    constexpr uint32_t xor_key_2 = __TIME__[4];
+    constexpr uint32_t xor_key_1      = __TIME__[2];
+    constexpr uint32_t xor_key_2      = __TIME__[4];
     constexpr uint32_t xor_key_offset = (xor_key_1 ^ xor_key_2);
 
     namespace fnv1a {
         constexpr uint32_t fnv_prime_value = 0x01000193;
 
         // only use these for compile-time hashing.
-        consteval uint32_t hash_ctime(const char *input, uint32_t val = 0x811c9dc5 ^ ::syscall::xor_key_offset)
+        consteval uint32_t hash_ctime(const char *input, uint32_t val = 0x811c9dc5 ^ ::syscall::xor_key_offset) noexcept
         {
             return input[0] == '\0' ? val : hash_ctime(input + 1, (val ^ *input) * fnv_prime_value);
         }
 
         // only used for comparing strings, etc during runtime.
-        constexpr uint32_t hash_rtime(const char *input, uint32_t val = 0x811c9dc5 ^ ::syscall::xor_key_offset)
+        constexpr uint32_t hash_rtime(const char *input, uint32_t val = 0x811c9dc5 ^ ::syscall::xor_key_offset) noexcept
         {
             return input[0] == '\0' ? val : hash_rtime(input + 1, (val ^ *input) * fnv_prime_value);
         }
     }// namespace fnv1a
 
     namespace utils {
-        SYSCALL_FORCEINLINE std::string wide_to_string(wchar_t *buffer) noexcept
+        SYSCALL_FORCEINLINE std::string convert_from_wide_to_string(wchar_t* buffer) noexcept
         {
-            auto string = std::wstring(buffer);
+            int wide_len = WideCharToMultiByte(CP_UTF8, 0, buffer, wcslen(buffer), NULL, 0, NULL, NULL);
 
-            if (string.empty())
+            if (!buffer || wide_len <= 0)
                 return "";
 
-            return std::string(string.begin(), string.end());
+            std::string out(wide_len, 0);
+            WideCharToMultiByte(CP_UTF8, 0, buffer, wcslen(buffer), out.data(), wide_len, NULL, NULL);
+
+            return out;
         }
     }// namespace utils
 
@@ -251,7 +254,7 @@ namespace syscall {
                 if (!ldr_entry->BaseDllName.Buffer)
                     continue;
 
-                auto name = ::syscall::utils::wide_to_string(ldr_entry->BaseDllName.Buffer);
+                auto name = ::syscall::utils::convert_from_wide_to_string(ldr_entry->BaseDllName.Buffer);
 
                 if (SYSCALL_HASH(name.data()) == module_hash)
                     return reinterpret_cast<T>(ldr_entry->DllBase);
@@ -328,7 +331,7 @@ namespace syscall {
                 if (!ldr_entry->BaseDllName.Buffer)
                     continue;
 
-                auto name = ::syscall::utils::wide_to_string(ldr_entry->BaseDllName.Buffer);
+                auto name = ::syscall::utils::convert_from_wide_to_string(ldr_entry->BaseDllName.Buffer);
 
                 auto export_address = ::syscall::win::get_module_export_from_table<uintptr_t>(
                         reinterpret_cast<uintptr_t>(ldr_entry->DllBase),
