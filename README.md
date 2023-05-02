@@ -18,7 +18,6 @@ Compile using MSVC not tested with clang or LLVM yet.
     INVOKE_SYSCALL( SHORT, NtUserGetAsyncKeyState, VK_INSERT );
 ```
 
-
 Another example if you don't want to create a syscall over again.
 
 ```cpp
@@ -95,6 +94,14 @@ Code provided is a simple benchmarking test for "ZwReadVirtualMemory" or "NtRead
 <b>Console output </b>
 ```
 ZwReadVirtualMemory completed in 1ms or 0.80ms
+```
+
+## Calling imports
+This single header library also includes a macro where you can call exports without imports showing up directly in your import list.
+You can call any import directly like this.
+
+```cpp
+INVOKE_LAZY_FN( int, MessageBoxA, NULL, "Hello world.", "MessageBox", MB_OK );
 ```
 
 ## Decompiler output
