@@ -204,7 +204,7 @@ namespace syscall {
             return input[0] == '\0' ? val : hash_ctime(input + 1, (val ^ *input) * fnv_prime_value);
         }
 
-        constexpr uint32_t hash_rtime(const char *input, unsigned val = 0x811c9dc5 ^ ::syscall::xor_key_offset) noexcept
+        SYSCALL_FORCEINLINE constexpr uint32_t hash_rtime(const char *input, unsigned val = 0x811c9dc5 ^ ::syscall::xor_key_offset) noexcept
         {
             return input[0] == '\0' ? val : hash_rtime(input + 1, (val ^ *input) * fnv_prime_value);
         }
