@@ -17,8 +17,6 @@
 #include <memory>
 #include <vector>
 
-#define SYSCALL_HASH(str) ::syscall::fnv1a::hash_rtime(str)
-
 #define SYSCALL_HASH_CT(str)                                            \
     []() [[msvc::forceinline]] {                                        \
         constexpr uint32_t hash_out{::syscall::fnv1a::hash_ctime(str)}; \
@@ -26,285 +24,176 @@
         return hash_out;                                                \
     }()
 
+#define SYSCALL_HASH(str) ::syscall::fnv1a::hash_rtime(str)
+
+#define INVOKE_LAZY_FN(type, export_name, ...)                                      \
+    [&]() [[msvc::forceinline]] {                                                   \
+        constexpr uint32_t export_hash{::syscall::fnv1a::hash_ctime(#export_name)}; \
+                                                                                    \
+        return syscall::invoke_lazy_import<type>(export_hash, __VA_ARGS__);         \
+    }()
+
 #define INVOKE_SYSCALL(type, export_name, ...)                                      \
     [&]() [[msvc::forceinline]] {                                                   \
         constexpr uint32_t export_hash{::syscall::fnv1a::hash_ctime(#export_name)}; \
                                                                                     \
-        return syscall::invoke_simple<type>(export_hash, __VA_ARGS__);              \
+        return syscall::invoke_syscall<type>(export_hash, __VA_ARGS__);             \
     }()
 
 namespace syscall {
     namespace nt {
+        typedef struct _PEB_LDR_DATA {
+            ULONG      Length;
+            BOOLEAN    Initialized;
+            PVOID      SsHandle;
+            LIST_ENTRY InLoadOrderModuleList;
+            LIST_ENTRY InMemoryOrderModuleList;
+            LIST_ENTRY InInitializationOrderModuleList;
+        } PEB_LDR_DATA, *PPEB_LDR_DATA;
+
         struct UNICODE_STRING {
             uint16_t Length;
             uint16_t MaximumLength;
             wchar_t *Buffer;
         };
 
-        typedef struct _PEB_LDR_DATA {
-            ULONG Length;
-            BOOLEAN Initialized;
-            PVOID SsHandle;
-            LIST_ENTRY InLoadOrderModuleList;
-            LIST_ENTRY InMemoryOrderModuleList;
-            LIST_ENTRY InInitializationOrderModuleList;
-        } PEB_LDR_DATA, *PPEB_LDR_DATA;
-
         typedef struct _LDR_MODULE {
-            LIST_ENTRY InLoadOrderModuleList;
-            LIST_ENTRY InMemoryOrderModuleList;
-            LIST_ENTRY InInitializationOrderModuleList;
-            PVOID BaseAddress;
-            PVOID EntryPoint;
-            ULONG SizeOfImage;
+            LIST_ENTRY     InLoadOrderModuleList;
+            LIST_ENTRY     InMemoryOrderModuleList;
+            LIST_ENTRY     InInitializationOrderModuleList;
+            PVOID          BaseAddress;
+            PVOID          EntryPoint;
+            ULONG          SizeOfImage;
             UNICODE_STRING FullDllName;
             UNICODE_STRING BaseDllName;
-            ULONG Flags;
-            SHORT LoadCount;
-            SHORT TlsIndex;
-            LIST_ENTRY HashTableEntry;
-            ULONG TimeDateStamp;
+            ULONG          Flags;
+            SHORT          LoadCount;
+            SHORT          TlsIndex;
+            LIST_ENTRY     HashTableEntry;
+            ULONG          TimeDateStamp;
         } LDR_MODULE, *PLDR_MODULE;
 
         typedef struct _PEB_FREE_BLOCK {
             _PEB_FREE_BLOCK *Next;
-            ULONG Size;
+            ULONG            Size;
         } PEB_FREE_BLOCK, *PPEB_FREE_BLOCK;
 
         typedef struct _RTL_DRIVE_LETTER_CURDIR {
-            USHORT Flags;
-            USHORT Length;
-            ULONG TimeStamp;
+            USHORT         Flags;
+            USHORT         Length;
+            ULONG          TimeStamp;
             UNICODE_STRING DosPath;
         } RTL_DRIVE_LETTER_CURDIR, *PRTL_DRIVE_LETTER_CURDIR;
 
         typedef struct _RTL_USER_PROCESS_PARAMETERS {
-            ULONG MaximumLength;
-            ULONG Length;
-            ULONG Flags;
-            ULONG DebugFlags;
-            PVOID ConsoleHandle;
-            ULONG ConsoleFlags;
-            HANDLE StdInputHandle;
-            HANDLE StdOutputHandle;
-            HANDLE StdErrorHandle;
-            UNICODE_STRING CurrentDirectoryPath;
-            HANDLE CurrentDirectoryHandle;
-            UNICODE_STRING DllPath;
-            UNICODE_STRING ImagePathName;
-            UNICODE_STRING CommandLine;
-            PVOID Environment;
-            ULONG StartingPositionLeft;
-            ULONG StartingPositionTop;
-            ULONG Width;
-            ULONG Height;
-            ULONG CharWidth;
-            ULONG CharHeight;
-            ULONG ConsoleTextAttributes;
-            ULONG WindowFlags;
-            ULONG ShowWindowFlags;
-            UNICODE_STRING WindowTitle;
-            UNICODE_STRING DesktopName;
-            UNICODE_STRING ShellInfo;
-            UNICODE_STRING RuntimeData;
+            ULONG                   MaximumLength;
+            ULONG                   Length;
+            ULONG                   Flags;
+            ULONG                   DebugFlags;
+            PVOID                   ConsoleHandle;
+            ULONG                   ConsoleFlags;
+            HANDLE                  StdInputHandle;
+            HANDLE                  StdOutputHandle;
+            HANDLE                  StdErrorHandle;
+            UNICODE_STRING          CurrentDirectoryPath;
+            HANDLE                  CurrentDirectoryHandle;
+            UNICODE_STRING          DllPath;
+            UNICODE_STRING          ImagePathName;
+            UNICODE_STRING          CommandLine;
+            PVOID                   Environment;
+            ULONG                   StartingPositionLeft;
+            ULONG                   StartingPositionTop;
+            ULONG                   Width;
+            ULONG                   Height;
+            ULONG                   CharWidth;
+            ULONG                   CharHeight;
+            ULONG                   ConsoleTextAttributes;
+            ULONG                   WindowFlags;
+            ULONG                   ShowWindowFlags;
+            UNICODE_STRING          WindowTitle;
+            UNICODE_STRING          DesktopName;
+            UNICODE_STRING          ShellInfo;
+            UNICODE_STRING          RuntimeData;
             RTL_DRIVE_LETTER_CURDIR DLCurrentDirectory[0x20];
         } RTL_USER_PROCESS_PARAMETERS, *PRTL_USER_PROCESS_PARAMETERS;
 
         typedef struct _PEB {
-            BOOLEAN InheritedAddressSpace;
-            BOOLEAN ReadImageFileExecOptions;
-            BOOLEAN BeingDebugged;
-            BOOLEAN Spare;
-            HANDLE Mutant;
-            PVOID ImageBaseAddress;
-            PPEB_LDR_DATA LoaderData;
+            BOOLEAN                     InheritedAddressSpace;
+            BOOLEAN                     ReadImageFileExecOptions;
+            BOOLEAN                     BeingDebugged;
+            BOOLEAN                     Spare;
+            HANDLE                      Mutant;
+            PVOID                       ImageBaseAddress;
+            PPEB_LDR_DATA               LoaderData;
             RTL_USER_PROCESS_PARAMETERS ProcessParameters;
-            PVOID SubSystemData;
-            PVOID ProcessHeap;
-            PVOID FastPebLock;
-            uintptr_t FastPebLockRoutine;
-            uintptr_t FastPebUnlockRoutine;
-            ULONG EnvironmentUpdateCount;
-            uintptr_t KernelCallbackTable;
-            PVOID EventLogSection;
-            PVOID EventLog;
-            PPEB_FREE_BLOCK FreeList;
-            ULONG TlsExpansionCounter;
-            PVOID TlsBitmap;
-            ULONG TlsBitmapBits[0x2];
-            PVOID ReadOnlySharedMemoryBase;
-            PVOID ReadOnlySharedMemoryHeap;
-            uintptr_t ReadOnlyStaticServerData;
-            PVOID AnsiCodePageData;
-            PVOID OemCodePageData;
-            PVOID UnicodeCaseTableData;
-            ULONG NumberOfProcessors;
-            ULONG NtGlobalFlag;
-            BYTE Spare2[0x4];
-            LARGE_INTEGER CriticalSectionTimeout;
-            ULONG HeapSegmentReserve;
-            ULONG HeapSegmentCommit;
-            ULONG HeapDeCommitTotalFreeThreshold;
-            ULONG HeapDeCommitFreeBlockThreshold;
-            ULONG NumberOfHeaps;
-            ULONG MaximumNumberOfHeaps;
-            uintptr_t *ProcessHeaps;
-            PVOID GdiSharedHandleTable;
-            PVOID ProcessStarterHelper;
-            PVOID GdiDCAttributeList;
-            PVOID LoaderLock;
-            ULONG OSMajorVersion;
-            ULONG OSMinorVersion;
-            ULONG OSBuildNumber;
-            ULONG OSPlatformId;
-            ULONG ImageSubSystem;
-            ULONG ImageSubSystemMajorVersion;
-            ULONG ImageSubSystemMinorVersion;
-            ULONG GdiHandleBuffer[0x22];
-            ULONG PostProcessInitRoutine;
-            ULONG TlsExpansionBitmap;
-            BYTE TlsExpansionBitmapBits[0x80];
-            ULONG SessionId;
+            PVOID                       SubSystemData;
+            PVOID                       ProcessHeap;
+            PVOID                       FastPebLock;
+            uintptr_t                   FastPebLockRoutine;
+            uintptr_t                   FastPebUnlockRoutine;
+            ULONG                       EnvironmentUpdateCount;
+            uintptr_t                   KernelCallbackTable;
+            PVOID                       EventLogSection;
+            PVOID                       EventLog;
+            PPEB_FREE_BLOCK             FreeList;
+            ULONG                       TlsExpansionCounter;
+            PVOID                       TlsBitmap;
+            ULONG                       TlsBitmapBits[0x2];
+            PVOID                       ReadOnlySharedMemoryBase;
+            PVOID                       ReadOnlySharedMemoryHeap;
+            uintptr_t                   ReadOnlyStaticServerData;
+            PVOID                       AnsiCodePageData;
+            PVOID                       OemCodePageData;
+            PVOID                       UnicodeCaseTableData;
+            ULONG                       NumberOfProcessors;
+            ULONG                       NtGlobalFlag;
+            BYTE                        Spare2[0x4];
+            LARGE_INTEGER               CriticalSectionTimeout;
+            ULONG                       HeapSegmentReserve;
+            ULONG                       HeapSegmentCommit;
+            ULONG                       HeapDeCommitTotalFreeThreshold;
+            ULONG                       HeapDeCommitFreeBlockThreshold;
+            ULONG                       NumberOfHeaps;
+            ULONG                       MaximumNumberOfHeaps;
+            uintptr_t                  *ProcessHeaps;
+            PVOID                       GdiSharedHandleTable;
+            PVOID                       ProcessStarterHelper;
+            PVOID                       GdiDCAttributeList;
+            PVOID                       LoaderLock;
+            ULONG                       OSMajorVersion;
+            ULONG                       OSMinorVersion;
+            ULONG                       OSBuildNumber;
+            ULONG                       OSPlatformId;
+            ULONG                       ImageSubSystem;
+            ULONG                       ImageSubSystemMajorVersion;
+            ULONG                       ImageSubSystemMinorVersion;
+            ULONG                       GdiHandleBuffer[0x22];
+            ULONG                       PostProcessInitRoutine;
+            ULONG                       TlsExpansionBitmap;
+            BYTE                        TlsExpansionBitmapBits[0x80];
+            ULONG                       SessionId;
         } PEB, *PPEB;
 
-        typedef BOOLEAN(NTAPI *PLDR_INIT_ROUTINE)(_In_ PVOID DllHandle,
-                                                  _In_ ULONG Reason,
-                                                  _In_opt_ PVOID Context);
-
-        typedef struct _LDRP_CSLIST {
-            PSINGLE_LIST_ENTRY Tail;
-        } LDRP_CSLIST, *PLDRP_CSLIST;
-
-        typedef struct _LDR_SERVICE_TAG_RECORD {
-            struct _LDR_SERVICE_TAG_RECORD *Next;
-            ULONG ServiceTag;
-        } LDR_SERVICE_TAG_RECORD, *PLDR_SERVICE_TAG_RECORD;
-
-        typedef enum _LDR_DDAG_STATE {
-            LdrModulesMerged = -5,
-            LdrModulesInitError = -4,
-            LdrModulesSnapError = -3,
-            LdrModulesUnloaded = -2,
-            LdrModulesUnloading = -1,
-            LdrModulesPlaceHolder = 0,
-            LdrModulesMapping = 1,
-            LdrModulesMapped = 2,
-            LdrModulesWaitingForDependencies = 3,
-            LdrModulesSnapping = 4,
-            LdrModulesSnapped = 5,
-            LdrModulesCondensed = 6,
-            LdrModulesReadyToInit = 7,
-            LdrModulesInitializing = 8,
-            LdrModulesReadyToRun = 9
-        } LDR_DDAG_STATE;
-
-        typedef struct _LDR_DDAG_NODE {
-            LIST_ENTRY Modules;
-            PLDR_SERVICE_TAG_RECORD ServiceTagList;
-            ULONG LoadCount;
-            ULONG LoadWhileUnloadingCount;
-            ULONG LowestLink;
-            union {
-                LDRP_CSLIST Dependencies;
-                SINGLE_LIST_ENTRY RemovalLink;
-            };
-            LDRP_CSLIST IncomingDependencies;
-            LDR_DDAG_STATE State;
-            SINGLE_LIST_ENTRY CondenseLink;
-            ULONG PreorderNumber;
-        } LDR_DDAG_NODE, *PLDR_DDAG_NODE;
-
-        typedef struct _RTL_BALANCED_NODE {
-            union {
-                struct _RTL_BALANCED_NODE *Children[2];
-                struct {
-                    struct _RTL_BALANCED_NODE *Left;
-                    struct _RTL_BALANCED_NODE *Right;
-                };
-            };
-            union {
-                UCHAR Red : 1;
-                UCHAR Balance : 2;
-                ULONG_PTR ParentValue;
-            };
-        } RTL_BALANCED_NODE, *PRTL_BALANCED_NODE;
-
         typedef struct _LDR_DATA_TABLE_ENTRY {
-            LIST_ENTRY InLoadOrderLinks;
-            LIST_ENTRY InMemoryOrderLinks;
-            union {
-                LIST_ENTRY InInitializationOrderLinks;
-                LIST_ENTRY InProgressLinks;
-            };
-            PVOID DllBase;
-            PLDR_INIT_ROUTINE EntryPoint;
-            ULONG SizeOfImage;
+            LIST_ENTRY     InLoadOrderLinks;
+            LIST_ENTRY     InMemoryOrderLinks;
+            PVOID          Reserved2[2];
+            PVOID          DllBase;
+            PVOID          EntryPoint;
+            PVOID          Reserved3;
             UNICODE_STRING FullDllName;
             UNICODE_STRING BaseDllName;
+            PVOID          Reserved5[3];
             union {
-                UCHAR FlagGroup[4];
-                ULONG Flags;
-                struct {
-                    ULONG PackagedBinary : 1;
-                    ULONG MarkedForRemoval : 1;
-                    ULONG ImageDll : 1;
-                    ULONG LoadNotificationsSent : 1;
-                    ULONG TelemetryEntryProcessed : 1;
-                    ULONG ProcessStaticImport : 1;
-                    ULONG InLegacyLists : 1;
-                    ULONG InIndexes : 1;
-                    ULONG ShimDll : 1;
-                    ULONG InExceptionTable : 1;
-                    ULONG ReservedFlags1 : 2;
-                    ULONG LoadInProgress : 1;
-                    ULONG LoadConfigProcessed : 1;
-                    ULONG EntryProcessed : 1;
-                    ULONG ProtectDelayLoad : 1;
-                    ULONG ReservedFlags3 : 2;
-                    ULONG DontCallForThreads : 1;
-                    ULONG ProcessAttachCalled : 1;
-                    ULONG ProcessAttachFailed : 1;
-                    ULONG CorDeferredValidate : 1;
-                    ULONG CorImage : 1;
-                    ULONG DontRelocate : 1;
-                    ULONG CorILOnly : 1;
-                    ULONG ChpeImage : 1;
-                    ULONG ChpeEmulatorImage : 1;
-                    ULONG ReservedFlags5 : 1;
-                    ULONG Redirected : 1;
-                    ULONG ReservedFlags6 : 2;
-                    ULONG CompatDatabaseProcessed : 1;
-                };
+                ULONG      CheckSum;
+                PVOID      Reserved6;
             };
-            USHORT ObsoleteLoadCount;
-            USHORT TlsIndex;
-            LIST_ENTRY HashLinks;
-            ULONG TimeDateStamp;
-            struct _ACTIVATION_CONTEXT *EntryPointActivationContext;
-            PVOID Lock;// RtlAcquireSRWLockExclusive
-            PLDR_DDAG_NODE DdagNode;
-            LIST_ENTRY NodeModuleLink;
-            struct _LDRP_LOAD_CONTEXT *LoadContext;
-            PVOID ParentDllBase;
-            PVOID SwitchBackContext;
-            RTL_BALANCED_NODE BaseAddressIndexNode;
-            RTL_BALANCED_NODE MappingInfoIndexNode;
-            ULONG_PTR OriginalBase;
-            LARGE_INTEGER LoadTime;
-            ULONG BaseNameHashValue;
-            uint32_t LoadReason;// since WIN8
-            ULONG ImplicitPathOptions;
-            ULONG ReferenceCount;// since WIN10
-            ULONG DependentLoadFlags;
-            UCHAR SigningLevel;// since REDSTONE2
-            ULONG CheckSum;    // since 22H1
-            PVOID ActivePatchImageBase;
-            uintptr_t HotPatchState;
+            ULONG          TimeDateStamp;
         } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
     }// namespace nt
 
-    constexpr uint32_t xor_key_1      = __TIME__[2];
-    constexpr uint32_t xor_key_2      = __TIME__[4];
+    constexpr uint32_t xor_key_1 = __TIME__[2];
+    constexpr uint32_t xor_key_2 = __TIME__[4];
     constexpr uint32_t xor_key_offset = (xor_key_1 ^ xor_key_2);
 
     namespace fnv1a {
@@ -388,13 +277,16 @@ namespace syscall {
             PIMAGE_OPTIONAL_HEADER32 optional_header32 = &nt_headers32->OptionalHeader;
             PIMAGE_OPTIONAL_HEADER64 optional_header64 = &nt_headers64->OptionalHeader;
 
+            // for 32bit modules.
             if (nt_headers32->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
                 // does not have a export table.
                 if (optional_header32->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size <= 0U)
                     return NULL;
 
                 export_directory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(module_address + optional_header32->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
-            } else if (nt_headers64->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+            }
+            // for 64bit modules.
+            else if (nt_headers64->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
                 // does not have a export table.
                 if (optional_header64->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size <= 0U)
                     return NULL;
@@ -495,7 +387,7 @@ namespace syscall {
                 return;
 
             std::vector<uint8_t> shellcode = {
-#if defined( _M_IX86 ) || defined( __i386__ )
+#if defined(_M_IX86) || defined(__i386__)
                 0xB8, 0x00, 0x10, 0x00, 0x00,            // mov eax, <syscall_id>
                 0x64, 0x8B, 0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0 (
                 0xFF, 0xD2,                              // call edx
@@ -541,15 +433,24 @@ namespace syscall {
     };
 
     template<typename T, typename... Args>
-    SYSCALL_FORCEINLINE T invoke_simple(uint32_t export_hash, Args... arguments) noexcept
+    SYSCALL_FORCEINLINE T invoke_syscall(uint32_t export_hash, Args... arguments) noexcept
     {
-        static auto syscall_fn = ::syscall::create_function(export_hash);
+        static auto syscall_function = ::syscall::create_function(export_hash);
 
-        if (!syscall_fn.is_valid_address()) {
+        if (!syscall_function.is_valid_address()) {
             return NULL;
         }
 
-        return syscall_fn.invoke_call<T>(arguments...);
+        return syscall_function.invoke_call<T>(arguments...);
+    }
+
+    template<typename T, typename... Args>
+    SYSCALL_FORCEINLINE T invoke_lazy_import(uint32_t export_hash, Args... arguments) noexcept
+    {
+        static auto exported_function = ::syscall::win::force_find_export<uintptr_t>(export_hash);
+
+        if (exported_function)
+            return reinterpret_cast<T(__stdcall *)(Args...)>(exported_function)(arguments...);
     }
 }// namespace syscall
 
