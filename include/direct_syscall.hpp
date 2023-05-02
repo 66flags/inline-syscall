@@ -211,17 +211,14 @@ namespace syscall {
     }// namespace fnv1a
 
     namespace utils {
-        SYSCALL_FORCEINLINE std::string convert_from_wide_to_string(wchar_t* buffer) noexcept
+        SYSCALL_FORCEINLINE std::string wide_to_string(wchar_t* buffer) noexcept
         {
-            int wide_len = WideCharToMultiByte(CP_UTF8, 0, buffer, wcslen(buffer), NULL, 0, NULL, NULL);
+            const auto out{std::wstring(buffer)};
 
-            if (!buffer || wide_len <= 0)
+            if (out.empty())
                 return "";
 
-            std::string out(wide_len, 0);
-            WideCharToMultiByte(CP_UTF8, 0, buffer, wcslen(buffer), out.data(), wide_len, NULL, NULL);
-
-            return out;
+            return std::string(out.begin(), out.end());
         }
     }// namespace utils
 
@@ -252,7 +249,7 @@ namespace syscall {
                 if (!ldr_entry->BaseDllName.Buffer)
                     continue;
 
-                auto name = ::syscall::utils::convert_from_wide_to_string(ldr_entry->BaseDllName.Buffer);
+                auto name = ::syscall::utils::wide_to_string(ldr_entry->BaseDllName.Buffer);
 
                 if (SYSCALL_HASH(name.data()) == module_hash)
                     return reinterpret_cast<T>(ldr_entry->DllBase);
@@ -329,7 +326,7 @@ namespace syscall {
                 if (!ldr_entry->BaseDllName.Buffer)
                     continue;
 
-                auto name = ::syscall::utils::convert_from_wide_to_string(ldr_entry->BaseDllName.Buffer);
+                auto name = ::syscall::utils::wide_to_string(ldr_entry->BaseDllName.Buffer);
 
                 auto export_address = ::syscall::win::get_module_export_from_table<uintptr_t>(
                         reinterpret_cast<uintptr_t>(ldr_entry->DllBase),
