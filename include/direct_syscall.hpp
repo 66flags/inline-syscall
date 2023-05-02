@@ -6,7 +6,7 @@
 #include <windows.h>
 
 #ifndef SYSCALL_NO_FORCEINLINE
-#if defined( _MSC_VER )
+#if defined(_MSC_VER)
 #define SYSCALL_FORCEINLINE __forceinline
 #endif
 #else
@@ -15,24 +15,23 @@
 
 #include <intrin.h>
 #include <memory>
+#include <vector>
 
-#define SYSCALL_HASH_CT( str )                                        \
-    [ ]( ) [[msvc::forceinline]]                                      \
-    {                                                                 \
-        constexpr uint32_t out = ::syscall::fnv1a::hash_ctime( str ); \
-                                                                      \
-        return out;                                                   \
-    }( )
+#define SYSCALL_HASH(str) ::syscall::fnv1a::hash_rtime(str)
 
-#define SYSCALL_HASH( str ) ::syscall::fnv1a::hash_rtime( str )
+#define SYSCALL_HASH_CT(str)                                            \
+    []() [[msvc::forceinline]] {                                        \
+        constexpr uint32_t hash_out{::syscall::fnv1a::hash_ctime(str)}; \
+                                                                        \
+        return hash_out;                                                \
+    }()
 
-#define INVOKE_SYSCALL( type, export_name, ... )                                \
-    [ & ]( ) [[msvc::forceinline]]                                              \
-    {                                                                           \
-        constexpr uint32_t name = ::syscall::fnv1a::hash_ctime( #export_name ); \
-                                                                                \
-        return syscall::invoke_simple< type >( name, __VA_ARGS__ );             \
-    }( )
+#define INVOKE_SYSCALL(type, export_name, ...)                                      \
+    [&]() [[msvc::forceinline]] {                                                   \
+        constexpr uint32_t export_hash{::syscall::fnv1a::hash_ctime(#export_name)}; \
+                                                                                    \
+        return syscall::invoke_simple<type>(export_hash, __VA_ARGS__);              \
+    }()
 
 namespace syscall {
     namespace nt {
@@ -108,7 +107,7 @@ namespace syscall {
             UNICODE_STRING DesktopName;
             UNICODE_STRING ShellInfo;
             UNICODE_STRING RuntimeData;
-            RTL_DRIVE_LETTER_CURDIR DLCurrentDirectory[ 0x20 ];
+            RTL_DRIVE_LETTER_CURDIR DLCurrentDirectory[0x20];
         } RTL_USER_PROCESS_PARAMETERS, *PRTL_USER_PROCESS_PARAMETERS;
 
         typedef struct _PEB {
@@ -132,7 +131,7 @@ namespace syscall {
             PPEB_FREE_BLOCK FreeList;
             ULONG TlsExpansionCounter;
             PVOID TlsBitmap;
-            ULONG TlsBitmapBits[ 0x2 ];
+            ULONG TlsBitmapBits[0x2];
             PVOID ReadOnlySharedMemoryBase;
             PVOID ReadOnlySharedMemoryHeap;
             uintptr_t ReadOnlyStaticServerData;
@@ -141,7 +140,7 @@ namespace syscall {
             PVOID UnicodeCaseTableData;
             ULONG NumberOfProcessors;
             ULONG NtGlobalFlag;
-            BYTE Spare2[ 0x4 ];
+            BYTE Spare2[0x4];
             LARGE_INTEGER CriticalSectionTimeout;
             ULONG HeapSegmentReserve;
             ULONG HeapSegmentCommit;
@@ -161,16 +160,16 @@ namespace syscall {
             ULONG ImageSubSystem;
             ULONG ImageSubSystemMajorVersion;
             ULONG ImageSubSystemMinorVersion;
-            ULONG GdiHandleBuffer[ 0x22 ];
+            ULONG GdiHandleBuffer[0x22];
             ULONG PostProcessInitRoutine;
             ULONG TlsExpansionBitmap;
-            BYTE TlsExpansionBitmapBits[ 0x80 ];
+            BYTE TlsExpansionBitmapBits[0x80];
             ULONG SessionId;
         } PEB, *PPEB;
 
-        typedef BOOLEAN( NTAPI *PLDR_INIT_ROUTINE )( _In_ PVOID DllHandle,
-                                                     _In_ ULONG Reason,
-                                                     _In_opt_ PVOID Context );
+        typedef BOOLEAN(NTAPI *PLDR_INIT_ROUTINE)(_In_ PVOID DllHandle,
+                                                  _In_ ULONG Reason,
+                                                  _In_opt_ PVOID Context);
 
         typedef struct _LDRP_CSLIST {
             PSINGLE_LIST_ENTRY Tail;
@@ -217,9 +216,8 @@ namespace syscall {
 
         typedef struct _RTL_BALANCED_NODE {
             union {
-                struct _RTL_BALANCED_NODE *Children[ 2 ];
-                struct
-                {
+                struct _RTL_BALANCED_NODE *Children[2];
+                struct {
                     struct _RTL_BALANCED_NODE *Left;
                     struct _RTL_BALANCED_NODE *Right;
                 };
@@ -244,10 +242,9 @@ namespace syscall {
             UNICODE_STRING FullDllName;
             UNICODE_STRING BaseDllName;
             union {
-                UCHAR FlagGroup[ 4 ];
+                UCHAR FlagGroup[4];
                 ULONG Flags;
-                struct
-                {
+                struct {
                     ULONG PackagedBinary : 1;
                     ULONG MarkedForRemoval : 1;
                     ULONG ImageDll : 1;
@@ -306,166 +303,170 @@ namespace syscall {
         } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
     }// namespace nt
 
+    constexpr uint32_t xor_key_1      = __TIME__[2];
+    constexpr uint32_t xor_key_2      = __TIME__[4];
+    constexpr uint32_t xor_key_offset = (xor_key_1 ^ xor_key_2);
+
     namespace fnv1a {
         constexpr uint32_t fnv_prime_value = 0x01000193;
-        constexpr uint32_t fnv_offset_basis = 0x811c9dc5;
 
         // only use these for compile-time hashing.
-        consteval uint32_t hash_ctime( const char *input, uint32_t val = fnv_offset_basis )
+        consteval uint32_t hash_ctime(const char *input, uint32_t val = 0x811c9dc5 ^ ::syscall::xor_key_offset)
         {
-            return input[ 0 ] == '\0' ? val : hash_ctime( input + 1, ( val ^ *input ) * fnv_prime_value );
+            return input[0] == '\0' ? val : hash_ctime(input + 1, (val ^ *input) * fnv_prime_value);
         }
 
         // only used for comparing strings, etc during runtime.
-        constexpr uint32_t hash_rtime( const char *input, uint32_t val = fnv_offset_basis )
+        constexpr uint32_t hash_rtime(const char *input, uint32_t val = 0x811c9dc5 ^ ::syscall::xor_key_offset)
         {
-            return input[ 0 ] == '\0' ? val : hash_rtime( input + 1, ( val ^ *input ) * fnv_prime_value );
+            return input[0] == '\0' ? val : hash_rtime(input + 1, (val ^ *input) * fnv_prime_value);
         }
     }// namespace fnv1a
 
     namespace utils {
-        SYSCALL_FORCEINLINE std::string wide_to_string( wchar_t *buffer ) noexcept
+        SYSCALL_FORCEINLINE std::string wide_to_string(wchar_t *buffer) noexcept
         {
-            auto string = std::wstring( buffer );
+            auto string = std::wstring(buffer);
 
-            if ( string.empty( ) )
+            if (string.empty())
                 return "";
 
-            return std::string( string.begin( ), string.end( ) );
+            return std::string(string.begin(), string.end());
         }
     }// namespace utils
 
     namespace win {
-        SYSCALL_FORCEINLINE nt::PEB *get_peb( ) noexcept
+        SYSCALL_FORCEINLINE nt::PEB *get_peb() noexcept
         {
-#if defined( _M_IX86 ) || defined( __i386__ )
-            return reinterpret_cast< nt::PEB * >( __readfsdword( 0x30 ) );
+#if defined(_M_IX86) || defined(__i386__)
+            return reinterpret_cast<::syscall::nt::PEB *>(__readfsdword(0x30));
 #else
-            return reinterpret_cast< nt::PEB * >( __readgsqword( 0x60 ) );
+            return reinterpret_cast<::syscall::nt::PEB *>(__readgsqword(0x60));
 #endif
         }
 
-        template< typename T >
-        static SYSCALL_FORCEINLINE T get_module_handle_from_hash( const uint32_t &module_hash ) noexcept
+        template<typename T>
+        static SYSCALL_FORCEINLINE T get_module_handle_from_hash(const uint32_t &module_hash) noexcept
         {
-            auto peb = win::get_peb( );
+            auto peb = ::syscall::win::get_peb();
 
-            if ( !peb )
+            if (!peb)
                 return NULL;
 
             auto head = &peb->LoaderData->InLoadOrderModuleList;
 
-            for ( auto it = head->Flink; it != head; it = it->Flink ) {
-                nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it, nt::LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
+            for (auto it = head->Flink; it != head; it = it->Flink) {
+                ::syscall::nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD(it, nt::LDR_DATA_TABLE_ENTRY,
+                                                                                    InLoadOrderLinks);
 
-                if ( !ldr_entry->BaseDllName.Buffer )
+                if (!ldr_entry->BaseDllName.Buffer)
                     continue;
 
-                auto name = utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
+                auto name = ::syscall::utils::wide_to_string(ldr_entry->BaseDllName.Buffer);
 
-                if ( SYSCALL_HASH( name.data( ) ) == module_hash )
-                    return reinterpret_cast< T >( ldr_entry->DllBase );
+                if (SYSCALL_HASH(name.data()) == module_hash)
+                    return reinterpret_cast<T>(ldr_entry->DllBase);
             }
 
             return NULL;
         }
 
-        template< typename T >
-        static SYSCALL_FORCEINLINE T get_module_export_from_table( uintptr_t module_address,
-                                                                   const uint32_t &export_hash ) noexcept
+        template<typename T>
+        static SYSCALL_FORCEINLINE T get_module_export_from_table(uintptr_t module_address,
+                                                                  const uint32_t &export_hash) noexcept
         {
-            auto dos_headers = reinterpret_cast< IMAGE_DOS_HEADER * >( module_address );
+            auto dos_headers = reinterpret_cast<IMAGE_DOS_HEADER *>(module_address);
 
-            if ( dos_headers->e_magic != IMAGE_DOS_SIGNATURE )
+            if (dos_headers->e_magic != IMAGE_DOS_SIGNATURE)
                 return NULL;
 
             PIMAGE_EXPORT_DIRECTORY export_directory = nullptr;
 
-            auto nt_headers32 = reinterpret_cast< PIMAGE_NT_HEADERS32 >( module_address + dos_headers->e_lfanew );
-            auto nt_headers64 = reinterpret_cast< PIMAGE_NT_HEADERS64 >( module_address + dos_headers->e_lfanew );
+            auto nt_headers32 = reinterpret_cast<PIMAGE_NT_HEADERS32>(module_address + dos_headers->e_lfanew);
+            auto nt_headers64 = reinterpret_cast<PIMAGE_NT_HEADERS64>(module_address + dos_headers->e_lfanew);
 
             PIMAGE_OPTIONAL_HEADER32 optional_header32 = &nt_headers32->OptionalHeader;
             PIMAGE_OPTIONAL_HEADER64 optional_header64 = &nt_headers64->OptionalHeader;
 
-            if ( nt_headers32->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC ) {
+            if (nt_headers32->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
                 // does not have a export table.
-                if ( optional_header32->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].Size <= 0U )
+                if (optional_header32->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size <= 0U)
                     return NULL;
 
-                export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( module_address + optional_header32->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
-            } else if ( nt_headers64->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC ) {
+                export_directory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(module_address + optional_header32->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
+            } else if (nt_headers64->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
                 // does not have a export table.
-                if ( optional_header64->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].Size <= 0U )
+                if (optional_header64->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size <= 0U)
                     return NULL;
 
-                export_directory = reinterpret_cast< PIMAGE_EXPORT_DIRECTORY >( module_address + optional_header64->DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ].VirtualAddress );
+                export_directory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(module_address + optional_header64->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
             }
 
-            auto names_rva = reinterpret_cast< uint32_t * >( module_address + export_directory->AddressOfNames );
-            auto functions_rva = reinterpret_cast< uint32_t * >( module_address + export_directory->AddressOfFunctions );
-            auto name_ordinals = reinterpret_cast< unsigned short * >( module_address + export_directory->AddressOfNameOrdinals );
+            auto names_rva = reinterpret_cast<uint32_t *>(module_address + export_directory->AddressOfNames);
+            auto functions_rva = reinterpret_cast<uint32_t *>(module_address + export_directory->AddressOfFunctions);
+            auto name_ordinals = reinterpret_cast<unsigned short *>(module_address + export_directory->AddressOfNameOrdinals);
 
             uint32_t number_of_names = export_directory->NumberOfNames;
 
-            for ( size_t i = 0; i < number_of_names; i++ ) {
-                const char *export_name = reinterpret_cast< const char * >( module_address + names_rva[ i ] );
+            for (size_t i = 0ul; i < number_of_names; i++) {
+                const char *export_name = reinterpret_cast<const char *>(module_address + names_rva[i]);
 
-                if ( export_hash == SYSCALL_HASH( export_name ) )
-                    return static_cast< T >( module_address + functions_rva[ name_ordinals[ i ] ] );
+                if (export_hash == SYSCALL_HASH(export_name))
+                    return static_cast<T>(module_address + functions_rva[name_ordinals[i]]);
             }
 
             return NULL;
         }
 
-        template< typename T >
-        SYSCALL_FORCEINLINE T force_find_export( const uint32_t &export_hash ) noexcept
+        template<typename T>
+        SYSCALL_FORCEINLINE T force_find_export(const uint32_t &export_hash) noexcept
         {
-            auto peb = ::syscall::win::get_peb( );
+            auto peb = ::syscall::win::get_peb();
 
-            if ( !peb || !export_hash )
+            if (!peb || !export_hash)
                 return NULL;
 
             auto head = &peb->LoaderData->InLoadOrderModuleList;
 
-            for ( auto it = head->Flink; it != head; it = it->Flink ) {
-                nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD( it,
-                                                                          nt::LDR_DATA_TABLE_ENTRY,
-                                                                           InLoadOrderLinks );
+            for (auto it = head->Flink; it != head; it = it->Flink) {
+                ::syscall::nt::_LDR_DATA_TABLE_ENTRY *ldr_entry = CONTAINING_RECORD(it,
+                                                                                    nt::LDR_DATA_TABLE_ENTRY,
+                                                                                    InLoadOrderLinks);
 
-                if ( !ldr_entry->BaseDllName.Buffer )
+                if (!ldr_entry->BaseDllName.Buffer)
                     continue;
 
-                auto name = ::syscall::utils::wide_to_string( ldr_entry->BaseDllName.Buffer );
+                auto name = ::syscall::utils::wide_to_string(ldr_entry->BaseDllName.Buffer);
 
-                auto export_address = ::syscall::win::get_module_export_from_table< uintptr_t >(
-                        reinterpret_cast< uintptr_t >( ldr_entry->DllBase ),
-                        export_hash );
+                auto export_address = ::syscall::win::get_module_export_from_table<uintptr_t>(
+                        reinterpret_cast<uintptr_t>(ldr_entry->DllBase),
+                        export_hash);
 
-                if ( !export_address )
+                if (!export_address)
                     continue;
 
-                return static_cast< T >( export_address );
+                return static_cast<T>(export_address);
             }
         }
     }// namespace win
 
-    SYSCALL_FORCEINLINE uint16_t get_return_code_from_export( uintptr_t export_address ) noexcept
+    SYSCALL_FORCEINLINE uint16_t get_return_code_from_export(uintptr_t export_address) noexcept
     {
-        if ( !export_address )
+        if (!export_address)
             return NULL;
 
-        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 12 ) + 1 );
+        return *reinterpret_cast<int *>(static_cast<uintptr_t>(export_address + 12) + 1);
     }
 
-    SYSCALL_FORCEINLINE int get_syscall_id_from_export( uintptr_t export_address ) noexcept
+    SYSCALL_FORCEINLINE int get_syscall_id_from_export(uintptr_t export_address) noexcept
     {
-        if ( !export_address )
+        if (!export_address)
             return NULL;
 
-#if defined( _M_IX86 ) || defined( __i386__ )
-        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address ) + 1 );
+#if defined(_M_IX86) || defined(__i386__)
+        return *reinterpret_cast<int *>(static_cast<uintptr_t>(export_address) + 1);
 #else
-        return *reinterpret_cast< int * >( static_cast< uintptr_t >( export_address + 3 ) + 1 );
+        return *reinterpret_cast<int *>(static_cast<uintptr_t>(export_address + 3) + 1);
 #endif
     }
 
@@ -475,86 +476,81 @@ namespace syscall {
         uint32_t _export_hash;
 
     public:
-        SYSCALL_FORCEINLINE ~create_function( ) noexcept
+        SYSCALL_FORCEINLINE ~create_function() noexcept
         {
-            if ( this->_allocated_memory ) {
-                VirtualFree( this->_allocated_memory, 0, MEM_RELEASE );
+            if (this->_allocated_memory) {
+                VirtualFree(this->_allocated_memory, 0, MEM_RELEASE);
                 this->_allocated_memory = nullptr;
             }
         }
 
-        SYSCALL_FORCEINLINE create_function( uint32_t export_hash ) noexcept
-            : _export_hash( export_hash )
+        SYSCALL_FORCEINLINE create_function(uint32_t export_hash) noexcept
+            : _export_hash(export_hash)
         {
 
-            static auto exported_address = ::syscall::win::force_find_export< uintptr_t >( this->_export_hash );
-            static auto syscall_table_id = ::syscall::get_syscall_id_from_export( exported_address );
+            static auto exported_address = ::syscall::win::force_find_export<uintptr_t>(this->_export_hash);
+            static auto syscall_table_id = ::syscall::get_syscall_id_from_export(exported_address);
 
-            if ( !!exported_address || !syscall_table_id )
+            if (!exported_address || !syscall_table_id)
                 return;
 
-            unsigned char shellcode[ ] =
-            {
+            std::vector<uint8_t> shellcode = {
 #if defined( _M_IX86 ) || defined( __i386__ )
-                0xB8, 0x00, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
+                0xB8, 0x00, 0x10, 0x00, 0x00,            // mov eax, <syscall_id>
                 0x64, 0x8B, 0x15, 0xC0, 0x00, 0x00, 0x00,// mov edx, DWORD PTR fs:0xc0 (
-                0xFF, 0xD2,                             // call edx
-                0xC2, 0x04, 0x00                        // ret 4
+                0xFF, 0xD2,                              // call edx
+                0xC2, 0x04, 0x00                         // ret 4
 #else
-                0x49, 0x89, 0xCA,                       // mov r10, rcx
-                0xB8, 0x3F, 0x10, 0x00, 0x00,           // mov eax, <syscall_id>
-                0x0F, 0x05,                             // syscall
-                0xC3                                    // ret
+                0x49, 0x89, 0xCA,                        // mov r10, rcx
+                0xB8, 0x3F, 0x10, 0x00, 0x00,            // mov eax, <syscall_id>
+                0x0F, 0x05,                              // syscall
+                0xC3                                     // ret
 #endif
             };
 
-#if defined( _M_IX86 ) || defined( __i386__ )
-            static auto syscall_return_code = ::syscall::get_return_code_from_export(
-                    exported_address );
-#endif
-
-#if defined( _M_IX86 ) || defined( __i386__ )
-            std::memcpy( &shellcode[ 15 ], &syscall_return_code, sizeof( uint16_t ) );
-            std::memcpy( &shellcode[ 1 ], &syscall_table_id, sizeof( int ) );
+#if defined(_M_IX86) || defined(__i386__)
+            // required for x86 ONLY!
+            *reinterpret_cast<uint16_t *>(&shellcode[15]) = ::syscall::get_return_code_from_export(exported_address);
+            *reinterpret_cast<int *>(&shellcode[1]) = syscall_table_id;
 #else
-            std::memcpy( &shellcode[ 4 ], &syscall_table_id, sizeof( int ) );
+            *reinterpret_cast<int *>(&shellcode[4]) = syscall_table_id;
 #endif
-            this->_allocated_memory = VirtualAlloc( nullptr,
-                                                    sizeof( shellcode ),
-                                                    MEM_COMMIT | MEM_RESERVE,
-                                                    PAGE_EXECUTE_READWRITE );
+            this->_allocated_memory = VirtualAlloc(nullptr,
+                                                   sizeof(shellcode),
+                                                   MEM_COMMIT | MEM_RESERVE,
+                                                   PAGE_EXECUTE_READWRITE);
 
-            if ( !this->_allocated_memory ) {
+            if (!this->_allocated_memory) {
                 return;
             }
 
-            std::memcpy( this->_allocated_memory, shellcode, sizeof( shellcode ) );
-            *reinterpret_cast< void ** >( &this->_function ) = this->_allocated_memory;
+            memcpy(this->_allocated_memory, shellcode.data(), sizeof(shellcode));
+            *reinterpret_cast<void **>(&this->_function) = this->_allocated_memory;
         }
 
-        SYSCALL_FORCEINLINE bool is_valid_address( ) noexcept
+        SYSCALL_FORCEINLINE bool is_valid_address() noexcept
         {
             return this->_function != nullptr;
         }
 
-        template< typename T, typename... Args >
-        SYSCALL_FORCEINLINE T invoke_call( Args... arguments ) noexcept
+        template<typename T, typename... Args>
+        SYSCALL_FORCEINLINE T invoke_call(Args... arguments) noexcept
         {
-            return reinterpret_cast< T( __stdcall * )( Args... ) >( this->_function )( arguments... );
+            return reinterpret_cast<T(__stdcall *)(Args...)>(this->_function)(arguments...);
         }
     };
 
-    template< typename T, typename... Args >
-    SYSCALL_FORCEINLINE T invoke_simple( uint32_t export_hash, Args... arguments ) noexcept
+    template<typename T, typename... Args>
+    SYSCALL_FORCEINLINE T invoke_simple(uint32_t export_hash, Args... arguments) noexcept
     {
-        static auto syscall_fn = ::syscall::create_function( export_hash );
+        static auto syscall_fn = ::syscall::create_function(export_hash);
 
-        if ( !syscall_fn.is_valid_address( ) ) {
+        if (!syscall_fn.is_valid_address()) {
             return NULL;
         }
 
-        return syscall_fn.invoke_call< T >( arguments... );
+        return syscall_fn.invoke_call<T>(arguments...);
     }
 }// namespace syscall
 
-#endif//DIRECT_SYSCALL_HPP
+#endif// DIRECT_SYSCALL_HPP

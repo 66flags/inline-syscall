@@ -34,7 +34,7 @@ BreakBeforeTernaryOperators: true
 BreakConstructorInitializers: BeforeColon
 BreakInheritanceList: BeforeColon
 ColumnLimit: 0
-CompactNamespaces: false
+CompactNamespaces: true
 ContinuationIndentWidth: 8
 IndentCaseLabels: true
 IndentPPDirectives: None
@@ -57,10 +57,10 @@ SpaceBeforeParens: ControlStatements
 SpaceBeforeRangeBasedForLoopColon: false
 SpaceInEmptyParentheses: false
 SpacesBeforeTrailingComments: 0
-SpacesInAngles: true
-SpacesInCStyleCastParentheses: true
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
 SpacesInContainerLiterals: false
-SpacesInParentheses: true
-SpacesInSquareBrackets: true
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
 TabWidth: 4
 UseTab: Never
