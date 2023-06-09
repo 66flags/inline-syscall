@@ -98,7 +98,7 @@ ZwReadVirtualMemory completed in 1ms or 0.80ms
 
 ## Calling imports
 This single header library also includes a macro where you can call exports without imports showing up directly in your import list.
-You can call any import directly like this.
+You can call any function like this.
 
 ```cpp
 INVOKE_LAZY_FN( int, MessageBoxA, NULL, "Hello world.", "MessageBox", MB_OK );
